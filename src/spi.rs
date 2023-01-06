@@ -29,66 +29,14 @@ pub fn spi2_init(spi2: SPI2, sclk: PB13, sdo: PB14, sdi: PB15, clocks: &Clocks) 
     });
 }
 
-pub fn spi_read<const P: char, const N: u8>(cs_pin: &mut Pin<P, N, Output>, register: u8, buffer: &mut [u8; 5]) -> Result<u8, Error> {
-    let mut read_cmd = [register, 0x00, 0x00, 0x00, 0x00];
-    cortex_m::interrupt::free(|cs| {
-        match SPI_BUS.borrow(cs).borrow_mut().as_mut() {
-            None => { }
-            Some(spi) => {
-                cs_pin.set_low();
-                //usb_println(arrform!(64,"write buffer {:?}",read_cmd).as_str());
-                match spi.transfer(&mut read_cmd) {
-                    Ok(r) => {
-                        buffer[0] = r[0];
-                        buffer[1] = r[1];
-                        buffer[2] = r[2];
-                        buffer[3] = r[3];
-                        buffer[4] = r[4];
-                        //usb_println(arrform!(64,"read answer {:?}",r).as_str());
-                    }
-                    Err(err) => {
-                        //usb_println(arrform!(64, "spi failed to read = {:?}", err).as_str());
-                    }
-                }
-                cs_pin.set_high();
-            }
-        }
-    });
-    // do it again now!
-    cortex_m::interrupt::free(|cs| {
-        match SPI_BUS.borrow(cs).borrow_mut().as_mut() {
-            None => { Err(Error::ModeFault) }
-            Some(spi) => {
-                cs_pin.set_low();
-                //usb_println(arrform!(64,"write buffer {:?}",read_cmd).as_str());
-                match spi.transfer(&mut read_cmd) {
-                    Ok(r) => {
-                        buffer[0] = r[0];
-                        buffer[1] = r[1];
-                        buffer[2] = r[2];
-                        buffer[3] = r[3];
-                        buffer[4] = r[4];
-                        //usb_println(arrform!(64,"read answer {:?}",r).as_str());
-                    }
-                    Err(err) => {
-                        //usb_println(arrform!(64, "spi failed to read = {:?}", err).as_str());
-                    }
-                }
-                cs_pin.set_high();
-                Ok(buffer[0])
-            }
-        }
-    })
-}
-
-pub fn spi_write<const P: char, const N: u8>(cs_pin: &mut Pin<P, N, Output>, register: u8, payload: &[u8; 4]) -> Result<u8, Error> {
+pub fn spi_write<const P: char, const N: u8>(cs_pin: &mut Pin<P, N, Output>, register: u8, payload: u8) -> Result<u8, Error> {
     cortex_m::interrupt::free(|cs| {
         match SPI_BUS.borrow(cs).borrow_mut().as_mut() {
             None => { Err(Error::ModeFault) }
             Some(spi) => {
                 cs_pin.set_low();
                 let mut status_byte = 0;
-                let mut buffer: [u8; 5] = [register | 0x80, payload[0], payload[1], payload[2], payload[3]];
+                let mut buffer: [u8; 2] = [register | 0x80, payload];
                 // usb_println(arrform!(64,"write buffer {:?}",buffer).as_str());
                 match spi.transfer(&mut buffer) {
                     Ok(r) => {
@@ -101,6 +49,29 @@ pub fn spi_write<const P: char, const N: u8>(cs_pin: &mut Pin<P, N, Output>, reg
                 }
                 cs_pin.set_high();
                 Ok(status_byte)
+            }
+        }
+    })
+}
+
+pub fn spi_read<const P: char, const N: u8>(cs_pin: &mut Pin<P, N, Output>, register: u8, buffer: &mut [u8]) -> Result<u8, Error> {
+    buffer[0] = register;
+    cortex_m::interrupt::free(|cs| {
+        match SPI_BUS.borrow(cs).borrow_mut().as_mut() {
+            None => { Err(Error::ModeFault) }
+            Some(spi) => {
+                cs_pin.set_low();
+                //usb_println(arrform!(64,"write buffer {:?}",read_cmd).as_str());
+                match spi.transfer(buffer) {
+                    Ok(r) => {
+                        //usb_println(arrform!(64,"read answer {:?}",r).as_str());
+                    }
+                    Err(err) => {
+                        //usb_println(arrform!(64, "spi failed to read = {:?}", err).as_str());
+                    }
+                }
+                cs_pin.set_high();
+                Ok(0)
             }
         }
     })

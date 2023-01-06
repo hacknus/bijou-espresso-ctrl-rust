@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use arrform::{arrform, ArrForm};
 use cortex_m::interrupt::Mutex;
-use stm32f4xx_hal::otg_fs::{UsbBus, USB};
+use stm32f4xx_hal::otg_fs::{UsbBus, USB, UsbBusType};
 use stm32f4xx_hal::pac::{interrupt};
 use usb_device::prelude::*;
 use usb_device::bus::UsbBusAllocator;
@@ -15,24 +15,24 @@ pub static G_USB_SERIAL: Mutex<RefCell<Option<SerialPort<UsbBus<USB>>>>> =
 pub static G_USB_DEVICE: Mutex<RefCell<Option<UsbDevice<UsbBus<USB>>>>> =
     Mutex::new(RefCell::new(None));
 
-pub unsafe fn usb_init(usb: USB) {
+pub unsafe fn usb_init(usb: USB) -> Result<(), UsbError> {
     static mut EP_MEMORY: [u32; 1024] = [0; 1024];
     static mut USB_BUS: Option<UsbBusAllocator<stm32f4xx_hal::otg_fs::UsbBusType>> = None;
     USB_BUS = Some(stm32f4xx_hal::otg_fs::UsbBusType::new(usb, &mut EP_MEMORY));
     let mut usb_bus = USB_BUS.as_ref().unwrap();
     let mut serial_port = SerialPort::new(&usb_bus);
-
+    let usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+        .manufacturer("University of Bern")
+        .product("Emanuel")
+        .serial_number("007")
+        .device_class(usbd_serial::USB_CLASS_CDC)
+        .build();
     cortex_m::interrupt::free(|cs| {
         *G_USB_SERIAL.borrow(cs).borrow_mut() = Some(serial_port);
-        *G_USB_DEVICE.borrow(cs).borrow_mut() = Some(
-            UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
-                .manufacturer("University of Bern")
-                .product("Emanuel")
-                .serial_number("007")
-                .device_class(usbd_serial::USB_CLASS_CDC)
-                .build(),
-        );
+        *G_USB_DEVICE.borrow(cs).borrow_mut() = Some(usb_dev);
     });
+
+    Ok(())
 }
 
 pub fn usb_read(message: &mut [u8; 1024]) -> bool {

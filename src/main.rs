@@ -19,6 +19,7 @@ use stm32f4xx_hal::{
 
 use freertos_rust::*;
 use core::alloc::Layout;
+use usb_device::UsbError;
 
 
 use crate::i2c::i2c1_init;
@@ -29,6 +30,8 @@ use crate::intrpt::{G_BUTTON};
 
 #[path = "devices/led.rs"]
 mod led;
+#[path = "devices/max31865.rs"]
+mod max31865;
 mod usb;
 mod i2c;
 mod spi;
@@ -51,6 +54,7 @@ fn main() -> ! {
         .cfgr
         .use_hse(8.MHz())
         .sysclk(48.MHz())
+        .hclk(48.MHz())
         .require_pll48clk()
         .pclk1(24.MHz())
         .pclk2(24.MHz())
@@ -81,8 +85,8 @@ fn main() -> ! {
 
     // initialize leds
     let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
-    let mut fault_1_led = LED::new(gpioe.pe3.into_push_pull_output());
-    let mut fault_2_led = LED::new(gpioe.pe4.into_push_pull_output());
+    let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
+    let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize switch
     let mut sw = gpiob.pb8.into_floating_input();
@@ -102,12 +106,30 @@ fn main() -> ! {
     };
     delay.delay(100.millis());
     unsafe {
-        usb_init(usb);
+        match usb_init(usb) {
+            Ok(_) => {}
+            Err(e) => {
+                match e {
+                    UsbError::WouldBlock => {}
+                    UsbError::ParseError => {}
+                    UsbError::BufferOverflow => {}
+                    UsbError::EndpointOverflow => {
+                    }
+                    UsbError::EndpointMemoryOverflow => {
+                    }
+                    UsbError::InvalidEndpoint => {}
+                    UsbError::Unsupported => {}
+                    UsbError::InvalidState => {}
+                }
+            }
+        }
+        stat_led.on();
         cortex_m::peripheral::NVIC::unmask(Interrupt::OTG_FS);
         // Enable the external interrupt in the NVIC by passing the button interrupt number
         cortex_m::peripheral::NVIC::unmask(sw.interrupt());
     }
-    usb_println("usb set up ok");
+    stat_led.on();
+    // usb_println("usb set up ok");
 
     let scl = gpiob.pb6;
     let sda = gpiob.pb7;
@@ -139,15 +161,34 @@ fn main() -> ! {
                 fault_2_led.off();
             }
         }
-        usb_println(arrform!(64, "T-{}", 3-i).as_str());
+        // usb_println(arrform!(64, "T-{}", 3-i).as_str());
     }
 
-    usb_println("boot up ok");
+    // usb_println("boot up ok");
 
     for _ in 0..=4 {
         delay.delay(200.millis());
         stat_led.toggle();
     }
+
+    stat_led.off();
+    Task::new().name("stat LED").stack_size(128).priority(TaskPriority(2)).start(move || {
+        loop{
+            freertos_rust::CurrentTask::delay(Duration::ms(1000));
+            stat_led.on();
+            freertos_rust::CurrentTask::delay(Duration::ms(1000));
+            stat_led.off();
+        }
+    }).unwrap();
+    Task::new().name("fault1 LED").stack_size(128).priority(TaskPriority(1)).start(move || {
+        loop{
+            freertos_rust::CurrentTask::delay(Duration::ms(333));
+            fault_1_led.on();
+            freertos_rust::CurrentTask::delay(Duration::ms(333));
+            fault_1_led.off();
+        }
+    }).unwrap();
+    FreeRtosUtils::start_scheduler();
 
     // infinite loop; just so we don't leave this stack frame
     loop {
