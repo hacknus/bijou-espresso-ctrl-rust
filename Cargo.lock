@@ -61,9 +61,9 @@ checksum = "a20104e2335ce8a659d6dd92a51a767a0c062599c73b343fd152cb401e828c3d"
 
 [[package]]
 name = "cortex-m"
-version = "0.7.6"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70858629a458fdfd39f9675c4dc309411f2a3f83bede76988d81bf1a0ecee9e0"
+checksum = "8ec610d8f49840a5b376c69663b6369e71f4b34484b9b2eb29fb918d92516cb9"
 dependencies = [
  "bare-metal 0.2.5",
  "bitfield",
@@ -275,7 +275,7 @@ dependencies = [
 [[package]]
 name = "stm32f4xx-hal"
 version = "0.14.0"
-source = "git+https://github.com/stm32-rs/stm32f4xx-hal#840a9a5d307cb53354a5305c13f8f8b9f881ead1"
+source = "git+https://github.com/stm32-rs/stm32f4xx-hal#15134d7063083ec246302b09f18eb3c774fd1f5e"
 dependencies = [
  "bare-metal 1.0.0",
  "bitflags",
@@ -308,9 +308,9 @@ dependencies = [
 
 [[package]]
 name = "synopsys-usb-otg"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c3df32f7bb328e3c6fc16aca6e49fb2dfde266a5d6fc38ee3ae1a0b76b80922"
+checksum = "678f3707a7b1fd4863023292c42f73c6bab0e9b0096f41ae612d1af0ff221b45"
 dependencies = [
  "cortex-m",
  "embedded-hal 0.2.7",

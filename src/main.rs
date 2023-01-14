@@ -27,6 +27,7 @@ use crate::led::LED;
 use crate::spi::spi2_init;
 use crate::usb::{usb_init, usb_print, usb_println, usb_read};
 use crate::intrpt::{G_BUTTON};
+use crate::tasks::{blink_led_1_task, blink_led_2_task, print_usb_task};
 
 #[path = "devices/led.rs"]
 mod led;
@@ -37,6 +38,7 @@ mod i2c;
 mod spi;
 mod commands;
 mod intrpt;
+mod tasks;
 
 
 #[global_allocator]
@@ -61,6 +63,7 @@ fn main() -> ! {
         .freeze();
 
     let mut delay = dp.TIM1.delay_us(&clocks);
+    delay.delay(100.millis());  // apparently required for USB to set up propperly...
 
     // initialize ports
     let gpioa = dp.GPIOA.split();
@@ -104,26 +107,10 @@ fn main() -> ! {
         pin_dp: gpioa.pa12.into_alternate(),
         hclk: clocks.hclk(),
     };
+
     delay.delay(100.millis());
     unsafe {
-        match usb_init(usb) {
-            Ok(_) => {}
-            Err(e) => {
-                match e {
-                    UsbError::WouldBlock => {}
-                    UsbError::ParseError => {}
-                    UsbError::BufferOverflow => {}
-                    UsbError::EndpointOverflow => {
-                    }
-                    UsbError::EndpointMemoryOverflow => {
-                    }
-                    UsbError::InvalidEndpoint => {}
-                    UsbError::Unsupported => {}
-                    UsbError::InvalidState => {}
-                }
-            }
-        }
-        stat_led.on();
+        usb_init(usb);
         cortex_m::peripheral::NVIC::unmask(Interrupt::OTG_FS);
         // Enable the external interrupt in the NVIC by passing the button interrupt number
         cortex_m::peripheral::NVIC::unmask(sw.interrupt());
@@ -173,20 +160,13 @@ fn main() -> ! {
 
     stat_led.off();
     Task::new().name("stat LED").stack_size(128).priority(TaskPriority(2)).start(move || {
-        loop{
-            freertos_rust::CurrentTask::delay(Duration::ms(1000));
-            stat_led.on();
-            freertos_rust::CurrentTask::delay(Duration::ms(1000));
-            stat_led.off();
-        }
+        blink_led_1_task(stat_led)
     }).unwrap();
     Task::new().name("fault1 LED").stack_size(128).priority(TaskPriority(1)).start(move || {
-        loop{
-            freertos_rust::CurrentTask::delay(Duration::ms(333));
-            fault_1_led.on();
-            freertos_rust::CurrentTask::delay(Duration::ms(333));
-            fault_1_led.off();
-        }
+        blink_led_2_task(fault_1_led)
+    }).unwrap();
+    Task::new().name("usb").stack_size(128).priority(TaskPriority(1)).start(move || {
+        print_usb_task()
     }).unwrap();
     FreeRtosUtils::start_scheduler();
 

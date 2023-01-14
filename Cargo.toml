@@ -29,4 +29,3 @@ freertos-rust = "*"
 [dependencies.stm32f4xx-hal]
 git = "https://github.com/stm32-rs/stm32f4xx-hal"
 features = ["rt", "stm32f405", "usb_fs"] # replace the model of your microcontroller here
-
