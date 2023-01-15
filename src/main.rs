@@ -89,6 +89,7 @@ fn main() -> ! {
 
     let dwt = cp.DWT.constrain(cp.DCB, &clocks);
     let mut timer = dp.TIM2.counter_ms(&clocks);
+    timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
 
     let mut delay = dp.TIM1.delay_us(&clocks);
     delay.delay(100.millis());  // apparently required for USB to set up properly...
@@ -263,10 +264,10 @@ fn main() -> ! {
         .start(move || {
             // print_usb_task()
             loop {
-                 let timestamp =  timer.now().ticks();
-                 usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
-                 freertos_rust::CurrentTask::delay(Duration::ms(1000));
-             }
+                let timestamp = timer.now().ticks();
+                usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
+                freertos_rust::CurrentTask::delay(Duration::ms(1000));
+            }
         }).unwrap();
 
     FreeRtosUtils::start_scheduler();
