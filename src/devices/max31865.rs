@@ -25,7 +25,7 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
         }
     }
 
-    pub fn init(&mut self) -> bool {
+    pub fn init(&mut self) {
         let mut data = 0;
         if self.wires == 3 {
             data = 0b11010000; // 3 wire
@@ -34,7 +34,6 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
         }
 
         self.write(0x00, data).unwrap();
-        true
     }
 
     pub fn get_raw_resistance(&mut self) -> u16 {

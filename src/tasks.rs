@@ -2,7 +2,7 @@ use freertos_rust::Duration;
 use crate::{LED, usb_println};
 
 pub fn blink_led_1_task<const P: char, const N: u8>(mut led: LED<P, N>) {
-    loop{
+    loop {
         freertos_rust::CurrentTask::delay(Duration::ms(333));
         led.on();
         freertos_rust::CurrentTask::delay(Duration::ms(333));
@@ -11,7 +11,7 @@ pub fn blink_led_1_task<const P: char, const N: u8>(mut led: LED<P, N>) {
 }
 
 pub fn blink_led_2_task<const P: char, const N: u8>(mut led: LED<P, N>) {
-    loop{
+    loop {
         freertos_rust::CurrentTask::delay(Duration::ms(1000));
         led.on();
         freertos_rust::CurrentTask::delay(Duration::ms(1000));

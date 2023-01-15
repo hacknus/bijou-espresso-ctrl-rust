@@ -19,15 +19,39 @@ use stm32f4xx_hal::{
 
 use freertos_rust::*;
 use core::alloc::Layout;
+use stm32f4xx_hal::dwt::DwtExt;
 use usb_device::UsbError;
-
 
 use crate::i2c::i2c1_init;
 use crate::led::LED;
 use crate::spi::spi2_init;
 use crate::usb::{usb_init, usb_print, usb_println, usb_read};
-use crate::intrpt::{G_BUTTON};
+use crate::max31865::MAX31865;
+use crate::pid::PID;
 use crate::tasks::{blink_led_1_task, blink_led_2_task, print_usb_task};
+
+use embedded_graphics::{
+    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    pixelcolor::BinaryColor,
+    prelude::*,
+    primitives::{
+        Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, StrokeAlignment, Triangle,
+    },
+    text::{Alignment, Text},
+    mock_display::MockDisplay,
+};
+
+use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+use stm32f4xx_hal::{
+    pac::I2C1,
+    i2c::{Mode as i2cMode, Error, I2c},
+    gpio::{PB6, PB7},
+    rcc::Clocks,
+    prelude::*,
+};
+use tinybmp::Bmp;
+use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
+
 
 #[path = "devices/led.rs"]
 mod led;
@@ -39,16 +63,17 @@ mod spi;
 mod commands;
 mod intrpt;
 mod tasks;
+mod pid;
 
 
 #[global_allocator]
 static GLOBAL: FreeRtosAllocator = FreeRtosAllocator;
 
 
-
 #[entry]
 fn main() -> ! {
     let mut dp = pac::Peripherals::take().unwrap();
+    let mut cp = cortex_m::peripheral::Peripherals::take().unwrap();
 
     let rcc = dp.RCC.constrain();
 
@@ -62,8 +87,11 @@ fn main() -> ! {
         .pclk2(24.MHz())
         .freeze();
 
+    let dwt = cp.DWT.constrain(cp.DCB, &clocks);
+    let mut timer = dp.TIM2.counter_ms(&clocks);
+
     let mut delay = dp.TIM1.delay_us(&clocks);
-    delay.delay(100.millis());  // apparently required for USB to set up propperly...
+    delay.delay(100.millis());  // apparently required for USB to set up properly...
 
     // initialize ports
     let gpioa = dp.GPIOA.split();
@@ -73,18 +101,13 @@ fn main() -> ! {
     let gpiod = dp.GPIOD.split();
 
     // initialize pins
+    let cs_5 = gpiod.pd14.into_push_pull_output();
+    let cs_4 = gpiod.pd10.into_push_pull_output();
+    let cs_3 = gpiod.pd11.into_push_pull_output();
     let cs_2 = gpiod.pd12.into_push_pull_output();
     let cs_1 = gpiod.pd13.into_push_pull_output();
-    let mut en_2 = gpioc.pc6.into_push_pull_output();
-    let mut en_1 = gpioe.pe12.into_push_pull_output();
-    let mut x_end_l = gpioe.pe10.into_push_pull_output();
-    let mut x_end_r = gpioe.pe11.into_push_pull_output();
-    let mut y_end_l = gpiob.pb11.into_push_pull_output();
-    let mut y_end_r = gpiob.pb12.into_push_pull_output();
-    x_end_r.set_low();
-    y_end_r.set_low();
-    x_end_l.set_low();
-    y_end_l.set_low();
+    let mut bldc_en = gpioa.pa8.into_push_pull_output();
+    let mut bldc_dir = gpioa.pa7.into_push_pull_output();
 
     // initialize leds
     let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
@@ -92,11 +115,7 @@ fn main() -> ! {
     let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize switch
-    let mut sw = gpiob.pb8.into_floating_input();
-    let mut syscfg = dp.SYSCFG.constrain();
-    sw.make_interrupt_source(&mut syscfg);
-    sw.trigger_on_edge(&mut dp.EXTI, Edge::Rising);
-    sw.enable_interrupt(&mut dp.EXTI);
+    let mut sw = gpiob.pb0.into_floating_input();
 
     // initialize usb
     let usb = USB {
@@ -112,8 +131,6 @@ fn main() -> ! {
     unsafe {
         usb_init(usb);
         cortex_m::peripheral::NVIC::unmask(Interrupt::OTG_FS);
-        // Enable the external interrupt in the NVIC by passing the button interrupt number
-        cortex_m::peripheral::NVIC::unmask(sw.interrupt());
     }
     stat_led.on();
     // usb_println("usb set up ok");
@@ -121,7 +138,20 @@ fn main() -> ! {
     let scl = gpiob.pb6;
     let sda = gpiob.pb7;
     // initialize i2c
-    i2c1_init(dp.I2C1, scl, sda, &clocks);
+    let i2c: I2c<I2C1, (PB6, PB7)> = dp.I2C1.i2c(
+        (scl, sda),
+        i2cMode::Standard {
+            frequency: 100.kHz(),
+        },
+        &clocks,
+    );
+    // i2c1_init(dp.I2C1, scl, sda, &clocks);
+
+    let interface = I2CDisplayInterface::new(i2c);
+
+    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+    display.init().unwrap();
 
     let sclk = gpiob.pb13;
     let sdo = gpiob.pb14;
@@ -129,68 +159,117 @@ fn main() -> ! {
     // initialize spi
     spi2_init(dp.SPI2, sclk, sdo, sdi, &clocks);
 
-    // Now that button is configured, move button into global context
-    cortex_m::interrupt::free(|cs| {
-        G_BUTTON.borrow(cs).replace(Some(sw));
-    });
+    // let mut max31865_1 = MAX31865::new(cs_1, 0.0, 2);
+    // let mut max31865_2 = MAX31865::new(cs_2, 0.0, 2);
+    // let mut max31865_3 = MAX31865::new(cs_3, 0.0, 2);
+    // let mut max31865_4 = MAX31865::new(cs_4, 0.0, 2);
+    // let mut max31865_5 = MAX31865::new(cs_5, 0.0, 2);
 
-    stat_led.on();
+    // max31865_1.init();
+    // max31865_2.init();
+    // max31865_3.init();
+    // max31865_4.init();
+    // max31865_5.init();
 
-    for i in 0..=3 {
-        delay.delay(1000.millis());
-        match i {
-            0 => { stat_led.on() }
-            1 => { fault_1_led.on() }
-            2 => { fault_2_led.on() }
-            _ => {
-                stat_led.off();
-                fault_1_led.off();
-                fault_2_led.off();
+    usb_println("boot up ok");
+
+    // Task::new()
+    //     .name("TEMPERATURE ADC TASK")
+    //     .stack_size(128)
+    //     .priority(TaskPriority(2))
+    //     .start(move || {
+    //         loop {
+    //             let t1 = 0.0; //max31865_1.get_temperature();
+    //             let t2 = 0.0; //max31865_2.get_temperature();
+    //             let t3 = 0.0; //max31865_3.get_temperature();
+    //             let t4 = 0.0; //max31865_4.get_temperature();
+    //             let t5 = 0.0; // max31865_5.get_temperature();
+    //
+    //             usb_println(arrform!(128, "{:.2}, {:.2}, {:.2}, {:.2}, {:.2}", t1, t2, t3, t4, t5).as_str());
+    //         }
+    //     }).unwrap();
+
+    // Task::new()
+    //     .name("PID TASK")
+    //     .stack_size(256)
+    //     .priority(TaskPriority(3))
+    //     .start(move || {
+    //         let mut pid = PID::new();
+    //         loop {
+    //             //pid.calculate(25.0, timer.now().ticks());
+    //             freertos_rust::CurrentTask::delay(Duration::ms(1000));
+    //         }
+    //     }).unwrap();
+
+    Task::new()
+        .name("DISPLAY TASK")
+        .stack_size(256)
+        .priority(TaskPriority(2))
+        .start(move || {
+            loop {
+                let bmp = Bmp::from_slice(include_bytes!("../rust.bmp")).expect("Failed to load BMP image");
+
+                // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
+                // the pixels correctly
+                let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(32, 0));
+
+                // We use the `color_converted` method here to automatically convert the RGB565 image data into
+                // BinaryColor values.
+                im.draw(&mut display.color_converted()).unwrap();
+
+                display.flush().unwrap();
+                freertos_rust::CurrentTask::delay(Duration::ms(1000));
+                let bmp = Bmp::from_slice(include_bytes!("../rust1.bmp")).expect("Failed to load BMP image");
+
+                // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
+                // the pixels correctly
+                let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(32, 0));
+
+                // We use the `color_converted` method here to automatically convert the RGB565 image data into
+                // BinaryColor values.
+                im.draw(&mut display.color_converted()).unwrap();
+
+                display.flush().unwrap();
+                freertos_rust::CurrentTask::delay(Duration::ms(1000));
             }
-        }
-        // usb_println(arrform!(64, "T-{}", 3-i).as_str());
-    }
+        }).unwrap();
 
-    // usb_println("boot up ok");
+    // Task::new()
+    //     .name("IDLE LED TASK")
+    //     .stack_size(128)
+    //     .priority(TaskPriority(2))
+    //     .start(move || {}).unwrap();
 
-    for _ in 0..=4 {
-        delay.delay(200.millis());
-        stat_led.toggle();
-    }
+    Task::new()
+        .name("stat LED")
+        .stack_size(64)
+        .priority(TaskPriority(2))
+        .start(move || {
+            blink_led_1_task(stat_led)
+        }).unwrap();
 
-    stat_led.off();
-    Task::new().name("stat LED").stack_size(128).priority(TaskPriority(2)).start(move || {
-        blink_led_1_task(stat_led)
-    }).unwrap();
-    Task::new().name("fault1 LED").stack_size(128).priority(TaskPriority(1)).start(move || {
-        blink_led_2_task(fault_1_led)
-    }).unwrap();
-    Task::new().name("usb").stack_size(128).priority(TaskPriority(1)).start(move || {
-        print_usb_task()
-    }).unwrap();
+    Task::new()
+        .name("fault1 LED")
+        .stack_size(64)
+        .priority(TaskPriority(1))
+        .start(move || {
+            blink_led_2_task(fault_1_led)
+        }).unwrap();
+
+    Task::new()
+        .name("USB TASK")
+        .stack_size(128)
+        .priority(TaskPriority(4))
+        .start(move || {
+            // print_usb_task()
+            loop {
+                 let timestamp =  timer.now().ticks();
+                 usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
+                 freertos_rust::CurrentTask::delay(Duration::ms(1000));
+             }
+        }).unwrap();
+
     FreeRtosUtils::start_scheduler();
-
-    // infinite loop; just so we don't leave this stack frame
-    loop {
-        let mut message_bytes = [0; 1024];
-        if usb_read(&mut message_bytes) {
-            match core::str::from_utf8(&message_bytes) {
-                Ok(cmd) => {
-                    usb_print("received: ");
-                    usb_println(cmd);
-                }
-                Err(_) => {}
-            }
-        }
-
-        // delay 100 ms
-        delay.delay(100.millis());
-        // one run takes approximately 0.05s
-
-        // toggle LED (one blink means two HK packets have been sent)
-        stat_led.toggle();
-        usb_println("cycle completed");
-    }
 }
 
 
