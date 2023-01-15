@@ -24,7 +24,6 @@ use usb_device::UsbError;
 
 use crate::i2c::i2c1_init;
 use crate::led::LED;
-use crate::spi::spi2_init;
 use crate::usb::{usb_init, usb_print, usb_println, usb_read};
 use crate::max31865::MAX31865;
 use crate::pid::PID;
@@ -44,9 +43,15 @@ use embedded_graphics::{
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use stm32f4xx_hal::{
     pac::I2C1,
-    i2c::{Mode as i2cMode, Error, I2c},
+    i2c::{Mode as i2cMode, Error as I2CError, I2c},
     gpio::{PB6, PB7},
     rcc::Clocks,
+    prelude::*,
+};
+use stm32f4xx_hal::{
+    pac::SPI2,
+    spi::{Error as SPIError, Spi, Phase, Polarity, Mode as spiMode},
+    gpio::{Output, PB13, PB14, PB15, Pin},
     prelude::*,
 };
 use tinybmp::Bmp;
@@ -59,7 +64,6 @@ mod led;
 mod max31865;
 mod usb;
 mod i2c;
-mod spi;
 mod commands;
 mod intrpt;
 mod tasks;
@@ -102,11 +106,11 @@ fn main() -> ! {
     let gpiod = dp.GPIOD.split();
 
     // initialize pins
-    let cs_5 = gpiod.pd14.into_push_pull_output();
-    let cs_4 = gpiod.pd10.into_push_pull_output();
-    let cs_3 = gpiod.pd11.into_push_pull_output();
-    let cs_2 = gpiod.pd12.into_push_pull_output();
-    let cs_1 = gpiod.pd13.into_push_pull_output();
+    let mut cs_5 = gpiod.pd14.into_push_pull_output();
+    let mut cs_4 = gpiod.pd10.into_push_pull_output();
+    let mut cs_3 = gpiod.pd11.into_push_pull_output();
+    let mut cs_2 = gpiod.pd12.into_push_pull_output();
+    let mut cs_1 = gpiod.pd13.into_push_pull_output();
     let mut bldc_en = gpioa.pa8.into_push_pull_output();
     let mut bldc_dir = gpioa.pa7.into_push_pull_output();
 
@@ -158,37 +162,48 @@ fn main() -> ! {
     let sdo = gpiob.pb14;
     let sdi = gpiob.pb15;
     // initialize spi
-    spi2_init(dp.SPI2, sclk, sdo, sdi, &clocks);
-
-    // let mut max31865_1 = MAX31865::new(cs_1, 0.0, 2);
-    // let mut max31865_2 = MAX31865::new(cs_2, 0.0, 2);
-    // let mut max31865_3 = MAX31865::new(cs_3, 0.0, 2);
-    // let mut max31865_4 = MAX31865::new(cs_4, 0.0, 2);
-    // let mut max31865_5 = MAX31865::new(cs_5, 0.0, 2);
-
-    // max31865_1.init();
-    // max31865_2.init();
-    // max31865_3.init();
-    // max31865_4.init();
-    // max31865_5.init();
-
+    // spi2_init(dp.SPI2, sclk, sdo, sdi, &clocks);
+    let mut spi: Spi<SPI2, (PB13, PB14, PB15)> = dp.SPI2.spi(
+        (sclk, sdo, sdi),
+        spiMode {
+            polarity: Polarity::IdleHigh,
+            phase: Phase::CaptureOnSecondTransition,
+        },
+        10.kHz(),
+        &clocks,
+    );
+    delay.delay(1000.millis());
     usb_println("boot up ok");
+    delay.delay(100.millis());
 
-    // Task::new()
-    //     .name("TEMPERATURE ADC TASK")
-    //     .stack_size(128)
-    //     .priority(TaskPriority(2))
-    //     .start(move || {
-    //         loop {
-    //             let t1 = 0.0; //max31865_1.get_temperature();
-    //             let t2 = 0.0; //max31865_2.get_temperature();
-    //             let t3 = 0.0; //max31865_3.get_temperature();
-    //             let t4 = 0.0; //max31865_4.get_temperature();
-    //             let t5 = 0.0; // max31865_5.get_temperature();
-    //
-    //             usb_println(arrform!(128, "{:.2}, {:.2}, {:.2}, {:.2}, {:.2}", t1, t2, t3, t4, t5).as_str());
-    //         }
-    //     }).unwrap();
+    Task::new()
+        .name("TEMPERATURE ADC TASK")
+        .stack_size(1024)
+        .priority(TaskPriority(4))
+        .start(move || {
+            let mut max31865_1 = MAX31865::new(cs_1, 0.0, 2);
+            let mut max31865_2 = MAX31865::new(cs_2, 0.0, 2);
+            let mut max31865_3 = MAX31865::new(cs_3, 0.0, 2);
+            let mut max31865_4 = MAX31865::new(cs_4, 0.0, 2);
+            let mut max31865_5 = MAX31865::new(cs_5, 0.0, 2);
+
+            max31865_1.init(&mut spi);
+            max31865_2.init(&mut spi);
+            max31865_3.init(&mut spi);
+            max31865_4.init(&mut spi);
+            max31865_5.init(&mut spi);
+
+            loop {
+                let t1 = max31865_1.get_temperature(&mut spi);
+                let t2 = max31865_2.get_temperature(&mut spi);
+                let t3 = max31865_3.get_temperature(&mut spi);
+                let t4 = max31865_4.get_temperature(&mut spi);
+                let t5 = max31865_5.get_temperature(&mut spi);
+
+                usb_println(arrform!(128, "{:.2}, {:.2}, {:.2}, {:.2}, {:.2}", t1, t2, t3, t4, t5).as_str());
+                freertos_rust::CurrentTask::delay(Duration::ms(100));
+            }
+        }).unwrap();
 
     // Task::new()
     //     .name("PID TASK")
@@ -204,7 +219,7 @@ fn main() -> ! {
 
     Task::new()
         .name("DISPLAY TASK")
-        .stack_size(256)
+        .stack_size(1024)
         .priority(TaskPriority(2))
         .start(move || {
             loop {
@@ -265,7 +280,7 @@ fn main() -> ! {
             // print_usb_task()
             loop {
                 let timestamp = timer.now().ticks();
-                usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
+                // usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
                 freertos_rust::CurrentTask::delay(Duration::ms(1000));
             }
         }).unwrap();
