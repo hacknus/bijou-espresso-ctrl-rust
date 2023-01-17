@@ -56,6 +56,7 @@ use stm32f4xx_hal::{
 };
 use tinybmp::Bmp;
 use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
+use stm32f4xx_hal::timer::Channel;
 
 
 #[path = "devices/led.rs"]
@@ -92,7 +93,7 @@ fn main() -> ! {
         .freeze();
 
     let dwt = cp.DWT.constrain(cp.DCB, &clocks);
-    let mut timer = dp.TIM2.counter_ms(&clocks);
+    let mut timer = dp.TIM5.counter_ms(&clocks);
     timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
 
     let mut delay = dp.TIM1.delay_us(&clocks);
@@ -102,8 +103,8 @@ fn main() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
     let gpioc = dp.GPIOC.split();
-    let gpioe = dp.GPIOE.split();
     let gpiod = dp.GPIOD.split();
+    let gpioe = dp.GPIOE.split();
 
     // initialize pins
     let mut cs_5 = gpiod.pd14.into_push_pull_output();
@@ -113,6 +114,10 @@ fn main() -> ! {
     let mut cs_1 = gpiod.pd13.into_push_pull_output();
     let mut bldc_en = gpioa.pa8.into_push_pull_output();
     let mut bldc_dir = gpioa.pa7.into_push_pull_output();
+    let mut buzz = gpioa.pa3.into_alternate();
+    let mut led_dim = gpiob.pb1.into_alternate();
+    let mut heater_1 = gpioc.pc6.into_alternate();
+    let mut heater_2 = gpioc.pc7.into_alternate();
 
     // initialize leds
     let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
@@ -121,6 +126,27 @@ fn main() -> ! {
 
     // initialize switch
     let mut sw = gpiob.pb0.into_floating_input();
+
+    // initialize buzzer
+    let mut buzz_pwm = dp.TIM2.pwm_hz(buzz, 2000.Hz(), &clocks);
+    let max_duty = buzz_pwm.get_max_duty();
+    buzz_pwm.set_duty(Channel::C4, max_duty / 2);
+
+
+    // initialize pwm timer 3
+    let (mut heater_1_pwm, mut heater_2_pwm, mut led_pwm) = dp.TIM3.pwm_hz((heater_1, heater_2, led_dim), 2000.Hz(), &clocks).split();
+
+    // initialize dimming LED
+    let max_duty = led_pwm.get_max_duty();
+    led_pwm.set_duty(max_duty / 2);
+
+    // initialize heater_1
+    let max_duty = heater_1_pwm.get_max_duty();
+    heater_1_pwm.set_duty(max_duty / 2);
+
+    // initialize heater_2
+    let max_duty = heater_2_pwm.get_max_duty();
+    heater_2_pwm.set_duty(max_duty / 2);
 
     // initialize usb
     let usb = USB {
@@ -150,9 +176,10 @@ fn main() -> ! {
         },
         &clocks,
     );
-    // i2c1_init(dp.I2C1, scl, sda, &clocks);
 
     let interface = I2CDisplayInterface::new(i2c);
+    let bmp = Bmp::from_slice(include_bytes!("../rust.bmp")).expect("Failed to load BMP image");
+    let bmp_inv = Bmp::from_slice(include_bytes!("../rust1.bmp")).expect("Failed to load BMP image");
 
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
@@ -161,8 +188,8 @@ fn main() -> ! {
     let sclk = gpiob.pb13;
     let sdo = gpiob.pb14;
     let sdi = gpiob.pb15;
+
     // initialize spi
-    // spi2_init(dp.SPI2, sclk, sdo, sdi, &clocks);
     let mut spi: Spi<SPI2, (PB13, PB14, PB15)> = dp.SPI2.spi(
         (sclk, sdo, sdi),
         spiMode {
@@ -223,7 +250,6 @@ fn main() -> ! {
         .priority(TaskPriority(2))
         .start(move || {
             loop {
-                let bmp = Bmp::from_slice(include_bytes!("../rust.bmp")).expect("Failed to load BMP image");
 
                 // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
                 // the pixels correctly
@@ -235,11 +261,10 @@ fn main() -> ! {
 
                 display.flush().unwrap();
                 freertos_rust::CurrentTask::delay(Duration::ms(1000));
-                let bmp = Bmp::from_slice(include_bytes!("../rust1.bmp")).expect("Failed to load BMP image");
 
                 // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
                 // the pixels correctly
-                let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(32, 0));
+                let im: Image<Bmp<Rgb565>> = Image::new(&bmp_inv, Point::new(32, 0));
 
                 // We use the `color_converted` method here to automatically convert the RGB565 image data into
                 // BinaryColor values.
@@ -272,18 +297,74 @@ fn main() -> ! {
             blink_led_2_task(fault_1_led)
         }).unwrap();
 
-    Task::new()
-        .name("USB TASK")
-        .stack_size(128)
-        .priority(TaskPriority(4))
-        .start(move || {
-            // print_usb_task()
-            loop {
-                let timestamp = timer.now().ticks();
-                // usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
-                freertos_rust::CurrentTask::delay(Duration::ms(1000));
-            }
-        }).unwrap();
+    // Task::new()
+    //     .name("BUZZER TASK")
+    //     .stack_size(512)
+    //     .priority(TaskPriority(4))
+    //     .start(move || {
+    //         // print_usb_task()
+    //         let tones = [
+    //             ('c', 261.Hz()),
+    //             ('d', 294.Hz()),
+    //             ('e', 329.Hz()),
+    //             ('f', 349.Hz()),
+    //             ('g', 392.Hz()),
+    //             ('a', 440.Hz()),
+    //             ('b', 493.Hz()),
+    //         ];
+    //
+    //         let tune = [
+    //             ('c', 1),
+    //             ('c', 1),
+    //             ('g', 1),
+    //             ('g', 1),
+    //             ('a', 1),
+    //             ('a', 1),
+    //             ('g', 2),
+    //             ('f', 1),
+    //             ('f', 1),
+    //             ('e', 1),
+    //             ('e', 1),
+    //             ('d', 1),
+    //             ('d', 1),
+    //             ('c', 2),
+    //             (' ', 4),
+    //         ];
+    //         let tempo = 300_u32;
+    //
+    //         loop {
+    //             // 1. Obtain a note in the tune
+    //             for note in tune {
+    //                 // 2. Retrieve the freqeuncy and beat associated with the note
+    //                 for tone in tones {
+    //                     // 2.1 Find a note match in the tones array and update frequency and beat variables accordingly
+    //                     if tone.0 == note.0 {
+    //                         // 3. Play the note for the desired duration (beats*tempo)
+    //                         // 3.1 Adjust period of the PWM output to match the new frequency
+    //                         buzz_pwm.set_period(tone.1);
+    //                         // 3.2 Enable the channel to generate desired PWM
+    //                         buzz_pwm.enable(Channel::C4);
+    //                         // 3.3 Keep the output on for as long as required
+    //                         freertos_rust::CurrentTask::delay(Duration::ms(note.1 * tempo));
+    //                     } else if note.0 == ' ' {
+    //                         // 2.2 if ' ' tone is found disable output for one beat
+    //                         buzz_pwm.disable(Channel::C4);
+    //                         freertos_rust::CurrentTask::delay(Duration::ms(tempo));
+    //                     }
+    //                 }
+    //                 // 4. Silence for half a beat between notes
+    //                 // 4.1 Disable the PWM output (silence)
+    //                 buzz_pwm.disable(Channel::C4);
+    //                 // 4.2 Keep the output off for half a beat between notes
+    //                 freertos_rust::CurrentTask::delay(Duration::ms(tempo / 2));
+    //
+    //                 // 5. Go back to 1.
+    //             }
+    //             let timestamp = timer.now().ticks();
+    //             // usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
+    //             freertos_rust::CurrentTask::delay(Duration::ms(1000));
+    //         }
+    //     }).unwrap();
 
     FreeRtosUtils::start_scheduler();
 }
