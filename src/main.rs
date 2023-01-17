@@ -178,8 +178,8 @@ fn main() -> ! {
     );
 
     let interface = I2CDisplayInterface::new(i2c);
-    let bmp = Bmp::from_slice(include_bytes!("../rust.bmp")).expect("Failed to load BMP image");
-    let bmp_inv = Bmp::from_slice(include_bytes!("../rust1.bmp")).expect("Failed to load BMP image");
+    let bmp = Bmp::from_slice(include_bytes!("../images/rust.bmp")).expect("Failed to load BMP image");
+    let bmp_inv = Bmp::from_slice(include_bytes!("../images/rust1.bmp")).expect("Failed to load BMP image");
 
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
