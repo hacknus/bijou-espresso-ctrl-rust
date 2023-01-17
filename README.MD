@@ -18,4 +18,7 @@ Flash/Run the code on the hardware using:
 To set up your system, be sure to follow [this guide](https://docs.rust-embedded.org/discovery/f3discovery/03-setup/index.html)!  
 Make sure you add did 
 ```rustup install nightly``` and
-```rustup target att thumbv7em-none-eabihg --toolchain nightly``` to add the target to the nightly toolchain.
+```rustup target att thumbv7em-none-eabihg --toolchain nightly``` to add the target to the nightly toolchain.  
+
+TODO:
+- implement SPI flash chip in software
