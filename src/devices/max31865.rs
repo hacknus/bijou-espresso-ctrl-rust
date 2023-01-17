@@ -38,7 +38,7 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
     }
 
     pub fn get_raw_resistance(&mut self, spi: &mut Spi<SPI2, (PB13, PB14, PB15)>) -> u16 {
-        let mut buffer = [0; 3];
+        let mut buffer = [0; 3];  // first entry is register addr, next two will be data
         self.read(spi, 0x01, &mut buffer).unwrap();
         let mut data: u16 = (buffer[1] as u16) << 8 | (buffer[2] as u16) ;
         data >> 1
