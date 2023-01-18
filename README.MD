@@ -13,12 +13,13 @@ Connect the board using a ST-Link V3 (with TagConnect) to a USB port on the comp
 First start the openocd server in a terminal/console window:
 ```openocd -f interface/stlink-v2-1.cfg -f target/stm32f4x.cfg```   
 Flash/Run the code on the hardware using:  
-```cargo +nightly run --package xy-stepper-ctrl --bin xy-stepper-ctrl --target thumbv7em-none-eabihf --release```  
+```cargo +nightly run --package bijou-espresso-ctrl-rust --bin bijou-espresso-ctrl-rust --target thumbv7em-none-eabihf --release```  
 
 To set up your system, be sure to follow [this guide](https://docs.rust-embedded.org/discovery/f3discovery/03-setup/index.html)!  
+Don't forget to install the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads).  
 Make sure you add did 
 ```rustup install nightly``` and
-```rustup target att thumbv7em-none-eabihg --toolchain nightly``` to add the target to the nightly toolchain.  
+```rustup target add thumbv7em-none-eabihf --toolchain nightly``` to add the target to the nightly toolchain.  
 
 TODO:
 - implement SPI flash chip in software
