@@ -175,6 +175,8 @@ fn main() -> ! {
     stat_led.on();
     // usb_println("usb set up ok");
 
+    //TODO: rotary encoder!
+
     let scl = gpiob.pb6;
     let sda = gpiob.pb7;
     // initialize i2c
@@ -276,6 +278,7 @@ fn main() -> ! {
                 match current_temperature {
                     None => {}
                     Some(t) => {
+                        // TODO: convert this to duty-cycle of PWM (ceiling and floor?)
                         pid.calculate(t, timer.now().ticks());
 
                     }

@@ -17,3 +17,5 @@ impl TemperatureData {
         }
     }
 }
+
+//TODO: we need a struct with all output data (PID, duty cycle etc..)
