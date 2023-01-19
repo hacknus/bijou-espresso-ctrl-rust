@@ -267,7 +267,7 @@ fn main() -> ! {
             let mut pid = PID::new();
             loop {
                 let mut current_temperature = None;
-                match temperature_data_container_display.lock(Duration::ms(1)) {
+                match temperature_data_container_pid.lock(Duration::ms(1)) {
                     Ok(temperature_data) => {
                         current_temperature = temperature_data.t5;
                     }
