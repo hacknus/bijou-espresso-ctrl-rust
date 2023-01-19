@@ -5,6 +5,9 @@
 #![feature(lang_items)]
 #![feature(alloc_error_handler)]
 
+extern crate alloc;
+
+use alloc::sync::Arc;
 use cortex_m::asm;
 use cortex_m_rt::exception;
 use cortex_m_rt::{entry, ExceptionFrame};
@@ -30,7 +33,6 @@ use crate::pid::PID;
 use crate::tasks::{blink_led_1_task, blink_led_2_task, print_usb_task};
 
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{
@@ -38,6 +40,11 @@ use embedded_graphics::{
     },
     text::{Alignment, Text},
     mock_display::MockDisplay,
+    mono_font::{
+        ascii::{FONT_10X20,FONT_6X10, FONT_6X12, FONT_9X15},
+        MonoTextStyle, MonoTextStyleBuilder,
+    },
+    mono_font::iso_8859_5::{FONT_5X8}
 };
 
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
@@ -57,6 +64,7 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
 use stm32f4xx_hal::timer::Channel;
+use crate::utils::TemperatureData;
 
 
 #[path = "devices/led.rs"]
@@ -69,6 +77,7 @@ mod commands;
 mod intrpt;
 mod tasks;
 mod pid;
+mod utils;
 
 
 #[global_allocator]
@@ -179,7 +188,7 @@ fn main() -> ! {
 
     let interface = I2CDisplayInterface::new(i2c);
     let bmp = Bmp::from_slice(include_bytes!("../images/rust.bmp")).expect("Failed to load BMP image");
-    let bmp_inv = Bmp::from_slice(include_bytes!("../images/rust1.bmp")).expect("Failed to load BMP image");
+    // let bmp_inv = Bmp::from_slice(include_bytes!("../images/rust1.bmp")).expect("Failed to load BMP image");
 
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
@@ -199,6 +208,13 @@ fn main() -> ! {
         10.kHz(),
         &clocks,
     );
+
+    let temperature_data = TemperatureData::new();
+    let temperature_data_container =  Arc::new(Mutex::new(temperature_data).expect("Failed to create serial guard mutex"));
+    let temperature_data_container_display = temperature_data_container.clone();
+    let temperature_data_container_adc = temperature_data_container.clone();
+    let temperature_data_container_pid = temperature_data_container.clone();
+
     delay.delay(1000.millis());
     usb_println("boot up ok");
     delay.delay(100.millis());
@@ -227,51 +243,137 @@ fn main() -> ! {
                 let t4 = max31865_4.get_temperature(&mut spi);
                 let t5 = max31865_5.get_temperature(&mut spi);
 
+                match temperature_data_container_adc.lock(Duration::ms(1)) {
+                    Ok(mut temperature_data) => {
+                        temperature_data.t1 = Some(t1);
+                        temperature_data.t2 = Some(t2);
+                        temperature_data.t3 = Some(t3);
+                        temperature_data.t4 = Some(t4);
+                        temperature_data.t5 = Some(t5);
+                    }
+                    Err(_) => {}
+                }
+
                 usb_println(arrform!(128, "{:.2}, {:.2}, {:.2}, {:.2}, {:.2}", t1, t2, t3, t4, t5).as_str());
                 freertos_rust::CurrentTask::delay(Duration::ms(100));
             }
         }).unwrap();
 
-    // Task::new()
-    //     .name("PID TASK")
-    //     .stack_size(256)
-    //     .priority(TaskPriority(3))
-    //     .start(move || {
-    //         let mut pid = PID::new();
-    //         loop {
-    //             //pid.calculate(25.0, timer.now().ticks());
-    //             freertos_rust::CurrentTask::delay(Duration::ms(1000));
-    //         }
-    //     }).unwrap();
+    Task::new()
+        .name("PID TASK")
+        .stack_size(256)
+        .priority(TaskPriority(3))
+        .start(move || {
+            let mut pid = PID::new();
+            loop {
+                let mut current_temperature = None;
+                match temperature_data_container_display.lock(Duration::ms(1)) {
+                    Ok(temperature_data) => {
+                        current_temperature = temperature_data.t5;
+                    }
+                    Err(_) => {}
+                }
+                match current_temperature {
+                    None => {}
+                    Some(t) => {
+                        pid.calculate(t, timer.now().ticks());
+
+                    }
+                }
+                freertos_rust::CurrentTask::delay(Duration::ms(1000));
+            }
+        }).unwrap();
 
     Task::new()
         .name("DISPLAY TASK")
         .stack_size(1024)
         .priority(TaskPriority(2))
         .start(move || {
+
+            // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
+            // the pixels correctly
+            let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(32, 0));
+
+            // We use the `color_converted` method here to automatically convert the RGB565 image data into
+            // BinaryColor values.
+            im.draw(&mut display.color_converted()).unwrap();
+
+            display.flush().unwrap();
+            freertos_rust::CurrentTask::delay(Duration::ms(1000));
+
             loop {
+                display.clear();
 
-                // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
-                // the pixels correctly
-                let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(32, 0));
+                let mut t1 = None;
+                let mut t2 = None;
+                let mut t3 = None;
+                let mut t4 = None;
+                let mut t5 = None;
 
-                // We use the `color_converted` method here to automatically convert the RGB565 image data into
-                // BinaryColor values.
-                im.draw(&mut display.color_converted()).unwrap();
+                match temperature_data_container_display.lock(Duration::ms(1)) {
+                    Ok(temperature_data) => {
+                        t1 = temperature_data.t1;
+                        t2 = temperature_data.t2;
+                        t3 = temperature_data.t3;
+                        t4 = temperature_data.t4;
+                        t5 = temperature_data.t5;
+                    }
+                    Err(_) => {}
+                }
+
+                match t1 {
+                    None => {}
+                    Some(t) => {
+                        Text::new(arrform!(128, "T1 = {:.2}", t).as_str(),
+                                  Point::new(0, 10),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
+                }
+
+                match t2 {
+                    None => {}
+                    Some(t) => {
+                        Text::new(arrform!(128, "T2 = {:.2}", t).as_str(),
+                                  Point::new(0, 20),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
+                }
+
+                match t3 {
+                    None => {}
+                    Some(t) => {
+                        Text::new(arrform!(128, "T3 = {:.2}", t).as_str(),
+                                  Point::new(0, 30),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
+                }
+
+                match t4 {
+                    None => {}
+                    Some(t) => {
+                        Text::new(arrform!(128, "T4 = {:.2}", t).as_str(),
+                                  Point::new(0, 40),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
+                }
+
+                match t5 {
+                    None => {}
+                    Some(t) => {
+                        Text::new(arrform!(128, "T5 = {:.2}", t).as_str(),
+                                  Point::new(0, 50),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
+                }
+
 
                 display.flush().unwrap();
-                freertos_rust::CurrentTask::delay(Duration::ms(1000));
-
-                // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
-                // the pixels correctly
-                let im: Image<Bmp<Rgb565>> = Image::new(&bmp_inv, Point::new(32, 0));
-
-                // We use the `color_converted` method here to automatically convert the RGB565 image data into
-                // BinaryColor values.
-                im.draw(&mut display.color_converted()).unwrap();
-
-                display.flush().unwrap();
-                freertos_rust::CurrentTask::delay(Duration::ms(1000));
+                freertos_rust::CurrentTask::delay(Duration::ms(100));
             }
         }).unwrap();
 

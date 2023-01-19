@@ -12,9 +12,9 @@ pub fn blink_led_1_task<const P: char, const N: u8>(mut led: LED<P, N>) {
 
 pub fn blink_led_2_task<const P: char, const N: u8>(mut led: LED<P, N>) {
     loop {
-        freertos_rust::CurrentTask::delay(Duration::ms(1000));
+        freertos_rust::CurrentTask::delay(Duration::ms(500));
         led.on();
-        freertos_rust::CurrentTask::delay(Duration::ms(1000));
+        freertos_rust::CurrentTask::delay(Duration::ms(500));
         led.off();
     }
 }
