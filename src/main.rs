@@ -64,6 +64,7 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
 use stm32f4xx_hal::timer::Channel;
+use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::utils::TemperatureData;
 
 
@@ -128,6 +129,15 @@ fn main() -> ! {
     let mut heater_1 = gpioc.pc6.into_alternate();
     let mut heater_2 = gpioc.pc7.into_alternate();
 
+    let mut enc_pin_a = gpioe.pe11.into_floating_input();
+    let mut enc_pin_b = gpioe.pe9.into_floating_input();
+    let mut enc_pin_sw = gpioe.pe10.into_floating_input();
+    let mut syscfg = dp.SYSCFG.constrain();
+    enc_pin_b.make_interrupt_source(&mut syscfg);
+    enc_pin_b.trigger_on_edge(&mut dp.EXTI, Edge::RisingFalling);
+    enc_pin_b.enable_interrupt(&mut dp.EXTI);
+
+
     // initialize leds
     let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
     let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
@@ -171,11 +181,21 @@ fn main() -> ! {
     unsafe {
         usb_init(usb);
         cortex_m::peripheral::NVIC::unmask(Interrupt::OTG_FS);
+        cortex_m::peripheral::NVIC::unmask(enc_pin_b.interrupt());
     }
+    // Now that button is configured, move button into global context
+    cortex_m::interrupt::free(|cs| {
+        G_ENC_PIN_A.borrow(cs).replace(Some(enc_pin_a));
+    });
+    // Now that button is configured, move button into global context
+    cortex_m::interrupt::free(|cs| {
+        G_ENC_PIN_B.borrow(cs).replace(Some(enc_pin_b));
+    });
+
     stat_led.on();
     // usb_println("usb set up ok");
 
-    //TODO: rotary encoder!
+    let mut pos: isize = 0;
 
     let scl = gpiob.pb6;
     let sda = gpiob.pb7;
@@ -374,6 +394,16 @@ fn main() -> ! {
                     }
                 }
 
+                cortex_m::interrupt::free(|cs| {
+                    pos = G_ENC_STATE
+                        .borrow(cs)
+                        .get();
+                });
+
+                Text::new(arrform!(128, "enc = {:}", pos).as_str(),
+                          Point::new(0, 60),
+                          MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                ).draw(&mut display).unwrap();
 
                 display.flush().unwrap();
                 freertos_rust::CurrentTask::delay(Duration::ms(100));
