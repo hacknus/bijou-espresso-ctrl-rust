@@ -19,6 +19,11 @@ const ENCODER_STEP: isize = 1;
 
 #[interrupt]
 fn EXTI9_5() {
+    // found by trial and error that EXTI9_5 corresponds to interrupt pin PE9 but not PE11,
+    // so we trigger on pin PE9 (we need to reset the interrupt flag after!)
+    // and read out PE11 as well.
+    // maybe/probably there is some documentation about EXTI and corresponding pins....
+
     // Start a Critical Section
     cortex_m::interrupt::free(|cs| {
         // Obtain access to Global Encoder Peripheral and Clear Interrupt Pending Flag
