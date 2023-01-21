@@ -18,6 +18,7 @@ pub static G_ENC_STATE: Mutex<Cell<isize>> = Mutex::new(Cell::new(0));
 const ENCODER_STEP: isize = 1;
 
 #[interrupt]
+#[allow(non_snake_case)]
 fn EXTI9_5() {
     // found by trial and error that EXTI9_5 corresponds to interrupt pin PE9 but not PE11,
     // so we trigger on pin PE9 (we need to reset the interrupt flag after!)

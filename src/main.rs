@@ -68,10 +68,8 @@ use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::utils::TemperatureData;
 
 
-#[path = "devices/led.rs"]
-mod led;
-#[path = "devices/max31865.rs"]
-mod max31865;
+use devices::led;
+use devices::max31865;
 mod usb;
 mod i2c;
 mod commands;
@@ -79,6 +77,7 @@ mod intrpt;
 mod tasks;
 mod pid;
 mod utils;
+mod devices;
 
 
 #[global_allocator]
@@ -506,6 +505,7 @@ fn main() -> ! {
 
 
 #[exception]
+#[allow(non_snake_case)]
 unsafe fn DefaultHandler(_irqn: i16) {
 // custom default handler
 // irqn is negative for Cortex-M exceptions
@@ -515,6 +515,7 @@ unsafe fn DefaultHandler(_irqn: i16) {
 }
 
 #[exception]
+#[allow(non_snake_case)]
 unsafe fn HardFault(_ef: &ExceptionFrame) -> ! {
 // Blink 3 times long when exception occures
     //delay_n(10);
@@ -536,6 +537,7 @@ fn alloc_error(_layout: Layout) -> ! {
 }
 
 #[no_mangle]
+#[allow(non_snake_case)]
 fn vApplicationStackOverflowHook(pxTask: FreeRtosTaskHandle, pcTaskName: FreeRtosCharPtr) {
     asm::bkpt();
 }
