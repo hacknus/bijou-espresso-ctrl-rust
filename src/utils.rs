@@ -18,4 +18,50 @@ impl TemperatureData {
     }
 }
 
-//TODO: we need a struct with all output data (PID, duty cycle etc..)
+pub struct OutputData {
+    pub p : Option<f32>,
+    pub i : Option<f32>,
+    pub d : Option<f32>,
+    pub pwm_val : Option<u32>,
+}
+
+impl OutputData {
+    pub fn new() -> Self {
+        OutputData {
+            p: None,
+            i: None,
+            d: None,
+            pwm_val: None,
+        }
+    }
+}
+
+pub enum State {
+    Idle,
+    Heating(f32),
+    Ready,
+    PreInfuse,
+    Extracting(u32)
+}
+
+pub struct Interface {
+    pub state : State,
+    pub lever_switch : bool,
+    pub extraction_triggered : bool,
+    pub steam_triggered : bool,
+    pub steam_open : bool,
+    pub water_low : bool,
+}
+
+impl Interface {
+    pub fn new() -> Self {
+        Interface {
+            state: State::Idle,
+            lever_switch: false,
+            extraction_triggered: false,
+            steam_triggered: false,
+            steam_open: false,
+            water_low: false,
+        }
+    }
+}
