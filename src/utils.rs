@@ -36,6 +36,7 @@ impl OutputData {
     }
 }
 
+#[derive(Debug)]
 pub enum State {
     Idle,
     Heating(f32),
