@@ -65,11 +65,13 @@ use tinybmp::Bmp;
 use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
 use stm32f4xx_hal::timer::Channel;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
-use crate::utils::TemperatureData;
+use crate::utils::{Interface, OutputData, State, TemperatureData};
 
 
 use devices::led;
 use devices::max31865;
+use crate::commands::{extract_command, send_housekeeping};
+
 mod usb;
 mod i2c;
 mod commands;
@@ -149,7 +151,6 @@ fn main() -> ! {
     let mut buzz_pwm = dp.TIM2.pwm_hz(buzz, 2000.Hz(), &clocks);
     let max_duty = buzz_pwm.get_max_duty();
     buzz_pwm.set_duty(Channel::C4, max_duty / 2);
-
 
     // initialize pwm timer 3
     let (mut heater_1_pwm, mut heater_2_pwm, mut led_pwm) = dp.TIM3.pwm_hz((heater_1, heater_2, led_dim), 2000.Hz(), &clocks).split();
@@ -231,10 +232,11 @@ fn main() -> ! {
     );
 
     let temperature_data = TemperatureData::new();
-    let temperature_data_container =  Arc::new(Mutex::new(temperature_data).expect("Failed to create serial guard mutex"));
+    let temperature_data_container =  Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
     let temperature_data_container_display = temperature_data_container.clone();
     let temperature_data_container_adc = temperature_data_container.clone();
     let temperature_data_container_pid = temperature_data_container.clone();
+    let temperature_data_container_usb = temperature_data_container.clone();
 
     delay.delay(1000.millis());
     usb_println("boot up ok");
@@ -274,8 +276,6 @@ fn main() -> ! {
                     }
                     Err(_) => {}
                 }
-
-                usb_println(arrform!(128, "{:.2}, {:.2}, {:.2}, {:.2}, {:.2}", t1, t2, t3, t4, t5).as_str());
                 freertos_rust::CurrentTask::delay(Duration::ms(100));
             }
         }).unwrap();
@@ -288,6 +288,7 @@ fn main() -> ! {
             let mut pid = PID::new();
             loop {
                 let mut current_temperature = None;
+                let mut pwm_val = 0.0;
                 match temperature_data_container_pid.lock(Duration::ms(1)) {
                     Ok(temperature_data) => {
                         current_temperature = temperature_data.t5;
@@ -298,8 +299,7 @@ fn main() -> ! {
                     None => {}
                     Some(t) => {
                         // TODO: convert this to duty-cycle of PWM (ceiling and floor?)
-                        pid.calculate(t, timer.now().ticks());
-
+                        pwm_val = pid.calculate(t, timer.now().ticks());
                     }
                 }
                 freertos_rust::CurrentTask::delay(Duration::ms(1000));
@@ -409,19 +409,50 @@ fn main() -> ! {
             }
         }).unwrap();
 
+    Task::new()
+        .name("USB TASK")
+        .stack_size(512)
+        .priority(TaskPriority(3))
+        .start(move || {
+            let mut data = TemperatureData::new();
+            let mut out_data = OutputData::new();
+            let mut interface = Interface::new();
+            let mut hk_rate = 500.0;
+            let mut hk = true;
+            let mut state = State::Idle;
+
+            loop {
+
+                match temperature_data_container_usb.lock(Duration::ms(1)) {
+                    Ok(temperature_data) => {
+                        data = temperature_data.clone();
+                    }
+                    Err(_) => {}
+                }
+
+                send_housekeeping(&data, &interface, &out_data, "");
+
+                let mut message_bytes = [0; 1024];
+                usb_read(&mut message_bytes);
+                match core::str::from_utf8(&message_bytes) {
+                    Ok(cmd) => {
+                        extract_command(&mut state, cmd, &mut hk, &mut hk_rate);
+                    }
+                    Err(_) => {}
+                }
+                // sample frequency
+                freertos_rust::CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
+                stat_led.toggle();
+                freertos_rust::CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
+                stat_led.toggle();
+            }
+        }).unwrap();
+
     // Task::new()
     //     .name("IDLE LED TASK")
     //     .stack_size(128)
     //     .priority(TaskPriority(2))
     //     .start(move || {}).unwrap();
-
-    Task::new()
-        .name("stat LED")
-        .stack_size(64)
-        .priority(TaskPriority(2))
-        .start(move || {
-            blink_led_1_task(stat_led)
-        }).unwrap();
 
     Task::new()
         .name("fault1 LED")

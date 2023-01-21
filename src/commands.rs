@@ -26,7 +26,6 @@ pub fn extract_command(
             let val: f32;
             let index = get_last_index(cmd);
             usb_println(arrform!(64,"index = {}", index).as_str());
-            delay(10000);
             match cmd[27..index].parse::<f32>() {
                 Ok(s) => {
                     val = s;
@@ -127,6 +126,7 @@ pub fn send_housekeeping(
         temperatures.t3.unwrap_or(0.0),
         temperatures.t4.unwrap_or(0.0),
         temperatures.t5.unwrap_or(0.0),
+        // TODO: pressure value!
         output.p.unwrap_or(0.0),
         output.i.unwrap_or(0.0),
         output.d.unwrap_or(0.0),

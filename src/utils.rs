@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct TemperatureData {
     pub t1 : Option<f32>,
     pub t2 : Option<f32>,
@@ -18,6 +19,7 @@ impl TemperatureData {
     }
 }
 
+#[derive(Clone)]
 pub struct OutputData {
     pub p : Option<f32>,
     pub i : Option<f32>,
@@ -36,7 +38,7 @@ impl OutputData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum State {
     Idle,
     Heating(f32),
@@ -45,6 +47,7 @@ pub enum State {
     Extracting(u32)
 }
 
+#[derive(Clone)]
 pub struct Interface {
     pub state : State,
     pub lever_switch : bool,
