@@ -22,6 +22,7 @@ use stm32f4xx_hal::{
 
 use freertos_rust::*;
 use core::alloc::Layout;
+use core::f32::consts::PI;
 use stm32f4xx_hal::dwt::DwtExt;
 use usb_device::UsbError;
 
@@ -65,7 +66,7 @@ use tinybmp::Bmp;
 use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
 use stm32f4xx_hal::timer::Channel;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
-use crate::utils::{Interface, OutputData, State, TemperatureData};
+use crate::utils::{Interface, PidData, PumpState, MeasuredData, State};
 
 
 use devices::led;
@@ -124,11 +125,12 @@ fn main() -> ! {
     let mut cs_2 = gpiod.pd12.into_push_pull_output();
     let mut cs_1 = gpiod.pd13.into_push_pull_output();
     let mut bldc_en = gpioa.pa8.into_push_pull_output();
-    let mut bldc_dir = gpioa.pa7.into_push_pull_output();
+    let mut bldc_dir = gpioc.pc9.into_push_pull_output();
     let mut buzz = gpioa.pa3.into_alternate();
     let mut led_dim = gpiob.pb1.into_alternate();
     let mut heater_1 = gpioc.pc6.into_alternate();
     let mut heater_2 = gpioc.pc7.into_alternate();
+    let mut bldc_v = gpioc.pc8.into_alternate();
 
     let mut enc_pin_a = gpioe.pe11.into_floating_input();
     let mut enc_pin_b = gpioe.pe9.into_floating_input();
@@ -153,11 +155,15 @@ fn main() -> ! {
     buzz_pwm.set_duty(Channel::C4, max_duty / 2);
 
     // initialize pwm timer 3
-    let (mut heater_1_pwm, mut heater_2_pwm, mut led_pwm) = dp.TIM3.pwm_hz((heater_1, heater_2, led_dim), 2000.Hz(), &clocks).split();
+    let (mut heater_1_pwm, mut heater_2_pwm, mut bldc_pwm, mut led_pwm) = dp.TIM3.pwm_hz((heater_1, heater_2, bldc_v, led_dim), 10000.Hz(), &clocks).split();
 
     // initialize dimming LED
     let max_duty = led_pwm.get_max_duty();
     led_pwm.set_duty(max_duty / 2);
+
+    // initialize bldc pwm
+    let max_duty = bldc_pwm.get_max_duty();
+    bldc_pwm.set_duty(max_duty / 2);
 
     // initialize heater_1
     let max_duty = heater_1_pwm.get_max_duty();
@@ -231,7 +237,7 @@ fn main() -> ! {
         &clocks,
     );
 
-    let temperature_data = TemperatureData::new();
+    let temperature_data = MeasuredData::new();
     let temperature_data_container =  Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
     let temperature_data_container_display = temperature_data_container.clone();
     let temperature_data_container_adc = temperature_data_container.clone();
@@ -277,6 +283,30 @@ fn main() -> ! {
                     Err(_) => {}
                 }
                 freertos_rust::CurrentTask::delay(Duration::ms(100));
+            }
+        }).unwrap();
+
+    Task::new()
+        .name("MAIN TASK")
+        .stack_size(256)
+        .priority(TaskPriority(5))
+        .start(move || {
+            let mut state = State::Idle;
+
+            loop {
+
+                // TODO: check buttons/switches
+                // TODO: update structs
+
+                match state {
+                    State::Idle => {}
+                    State::Heating => {}
+                    State::Ready => {}
+                    State::PreInfuse => {}
+                    State::Extracting => {}
+                }
+
+                freertos_rust::CurrentTask::delay(Duration::ms(10));
             }
         }).unwrap();
 
@@ -344,7 +374,12 @@ fn main() -> ! {
                 }
 
                 match t1 {
-                    None => {}
+                    None => {
+                        Text::new("T1 = - ",
+                                  Point::new(0, 10),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
                     Some(t) => {
                         Text::new(arrform!(128, "T1 = {:.2}", t).as_str(),
                                   Point::new(0, 10),
@@ -354,7 +389,12 @@ fn main() -> ! {
                 }
 
                 match t2 {
-                    None => {}
+                    None => {
+                        Text::new("T2 = - ",
+                                  Point::new(0, 20),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
                     Some(t) => {
                         Text::new(arrform!(128, "T2 = {:.2}", t).as_str(),
                                   Point::new(0, 20),
@@ -364,7 +404,12 @@ fn main() -> ! {
                 }
 
                 match t3 {
-                    None => {}
+                    None => {
+                        Text::new("T3 = - ",
+                                  Point::new(0, 30),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
                     Some(t) => {
                         Text::new(arrform!(128, "T3 = {:.2}", t).as_str(),
                                   Point::new(0, 30),
@@ -374,7 +419,12 @@ fn main() -> ! {
                 }
 
                 match t4 {
-                    None => {}
+                    None => {
+                        Text::new("T4 = - ",
+                                  Point::new(0, 40),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
                     Some(t) => {
                         Text::new(arrform!(128, "T4 = {:.2}", t).as_str(),
                                   Point::new(0, 40),
@@ -384,7 +434,12 @@ fn main() -> ! {
                 }
 
                 match t5 {
-                    None => {}
+                    None => {
+                        Text::new("T5 = - ",
+                                  Point::new(0, 50),
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                        ).draw(&mut display).unwrap();
+                    }
                     Some(t) => {
                         Text::new(arrform!(128, "T5 = {:.2}", t).as_str(),
                                   Point::new(0, 50),
@@ -414,12 +469,12 @@ fn main() -> ! {
         .stack_size(512)
         .priority(TaskPriority(3))
         .start(move || {
-            let mut data = TemperatureData::new();
-            let mut out_data = OutputData::new();
+            let mut data = MeasuredData::new();
+            let mut out_data = PidData::new();
             let mut interface = Interface::new();
             let mut hk_rate = 500.0;
             let mut hk = true;
-            let mut state = State::Idle;
+            let mut state = PumpState::Stop;
 
             loop {
 
@@ -455,11 +510,41 @@ fn main() -> ! {
     //     .start(move || {}).unwrap();
 
     Task::new()
-        .name("fault1 LED")
-        .stack_size(64)
-        .priority(TaskPriority(1))
+        .name("LED TASK")
+        .stack_size(128)
+        .priority(TaskPriority(0))
         .start(move || {
-            blink_led_2_task(fault_1_led)
+            let mut state = State::Idle;
+            let max_duty = led_pwm.get_max_duty();
+            let mut count = 0;
+            loop {
+                count += 10;
+                match state {
+                    State::Idle => {
+                        led_pwm.set_duty(0);
+                    }
+                    State::Heating => {
+                        let val = (max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI)) as u16); // LED1
+                        led_pwm.set_duty(val);
+                    }
+                    State::Ready => {
+                        led_pwm.set_duty(max_duty);
+                    }
+                    State::PreInfuse => {
+                        led_pwm.set_duty(0);
+                        freertos_rust::CurrentTask::delay(Duration::ms(250));
+                        led_pwm.set_duty(max_duty);
+                        freertos_rust::CurrentTask::delay(Duration::ms(225));
+                    }
+                    State::Extracting => {
+                        led_pwm.set_duty(0);
+                        freertos_rust::CurrentTask::delay(Duration::ms(500));
+                        led_pwm.set_duty(max_duty);
+                        freertos_rust::CurrentTask::delay(Duration::ms(475));
+                    }
+                }
+                freertos_rust::CurrentTask::delay(Duration::ms(25));
+            }
         }).unwrap();
 
     // Task::new()
