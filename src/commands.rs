@@ -1,7 +1,7 @@
 use arrform::{arrform, ArrForm};
 use cortex_m::asm::delay;
 use crate::{usb_println};
-use crate::utils::{Interface, OutputData, State, TemperatureData};
+use crate::utils::{Interface, PidData, PumpState, MeasuredData};
 
 fn get_last_index(cmd: &str) -> usize {
     let mut index: usize = 0;
@@ -16,7 +16,7 @@ fn get_last_index(cmd: &str) -> usize {
 }
 
 pub fn extract_command(
-    state: &mut State,
+    state: &mut PumpState,
     cmd: &str,
     hk: &mut bool,
     hk_rate: &mut f32,
@@ -29,7 +29,7 @@ pub fn extract_command(
             match cmd[27..index].parse::<f32>() {
                 Ok(s) => {
                     val = s;
-                    *state = State::Heating(val);
+                    //*state = PumpState::Heating(val);
                     usb_println(arrform!(64,"[ACK] cmd OK, set coffee temperature = {}", s).as_str());
                 }
                 Err(err) => {
@@ -42,7 +42,7 @@ pub fn extract_command(
             match cmd[26..index].parse::<f32>() {
                 Ok(s) => {
                     val = s;
-                    *state = State::Heating(val);
+                    //*state = PumpState::Heating(val);
                     usb_println(arrform!(64,"[ACK] cmd OK, set steam temperature = {}", s).as_str());
                 }
                 Err(err) => {
@@ -56,7 +56,7 @@ pub fn extract_command(
                 Ok(s) => {
                     val = s;
                     // 400 Hz corresponds to 1 mm/s movement
-                    *state = State::Extracting(val as u32);
+                    //*state = PumpState::Extracting(val as u32);
                     usb_println(arrform!(64,"[ACK] cmd OK, start extracting for {} seconds", s).as_str());
                 }
                 Err(err) => {
@@ -107,9 +107,9 @@ pub fn cmd_ok() {
 }
 
 pub fn send_housekeeping(
-    temperatures: &TemperatureData,
+    temperatures: &MeasuredData,
     interface: &Interface,
-    output: &OutputData,
+    output: &PidData,
     msg: &str,
 ) {
     let hk = arrform!(
