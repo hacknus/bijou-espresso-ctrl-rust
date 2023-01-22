@@ -42,10 +42,10 @@ use embedded_graphics::{
     text::{Alignment, Text},
     mock_display::MockDisplay,
     mono_font::{
-        ascii::{FONT_10X20,FONT_6X10, FONT_6X12, FONT_9X15},
+        ascii::{FONT_10X20, FONT_6X10, FONT_6X12, FONT_9X15},
         MonoTextStyle, MonoTextStyleBuilder,
     },
-    mono_font::iso_8859_5::{FONT_5X8}
+    mono_font::iso_8859_5::{FONT_5X8},
 };
 
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
@@ -66,7 +66,7 @@ use tinybmp::Bmp;
 use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
 use stm32f4xx_hal::timer::Channel;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
-use crate::utils::{Interface, PidData, PumpState, MeasuredData, State};
+use crate::utils::{Interface, PidData, MeasuredData, State, PumpData, LedState};
 
 
 use devices::led;
@@ -105,8 +105,8 @@ fn main() -> ! {
         .freeze();
 
     let dwt = cp.DWT.constrain(cp.DCB, &clocks);
-    let mut timer = dp.TIM5.counter_ms(&clocks);
-    timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
+    let mut tick_timer = dp.TIM5.counter_ms(&clocks);
+    tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
 
     let mut delay = dp.TIM1.delay_us(&clocks);
     delay.delay(100.millis());  // apparently required for USB to set up properly...
@@ -238,7 +238,7 @@ fn main() -> ! {
     );
 
     let temperature_data = MeasuredData::new();
-    let temperature_data_container =  Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
+    let temperature_data_container = Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
     let temperature_data_container_display = temperature_data_container.clone();
     let temperature_data_container_adc = temperature_data_container.clone();
     let temperature_data_container_pid = temperature_data_container.clone();
@@ -287,30 +287,6 @@ fn main() -> ! {
         }).unwrap();
 
     Task::new()
-        .name("MAIN TASK")
-        .stack_size(256)
-        .priority(TaskPriority(5))
-        .start(move || {
-            let mut state = State::Idle;
-
-            loop {
-
-                // TODO: check buttons/switches
-                // TODO: update structs
-
-                match state {
-                    State::Idle => {}
-                    State::Heating => {}
-                    State::Ready => {}
-                    State::PreInfuse => {}
-                    State::Extracting => {}
-                }
-
-                freertos_rust::CurrentTask::delay(Duration::ms(10));
-            }
-        }).unwrap();
-
-    Task::new()
         .name("PID TASK")
         .stack_size(256)
         .priority(TaskPriority(3))
@@ -329,7 +305,7 @@ fn main() -> ! {
                     None => {}
                     Some(t) => {
                         // TODO: convert this to duty-cycle of PWM (ceiling and floor?)
-                        pwm_val = pid.calculate(t, timer.now().ticks());
+                        pwm_val = pid.calculate(t, tick_timer.now().ticks());
                     }
                 }
                 freertos_rust::CurrentTask::delay(Duration::ms(1000));
@@ -377,13 +353,13 @@ fn main() -> ! {
                     None => {
                         Text::new("T1 = - ",
                                   Point::new(0, 10),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                     Some(t) => {
                         Text::new(arrform!(128, "T1 = {:.2}", t).as_str(),
                                   Point::new(0, 10),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                 }
@@ -392,13 +368,13 @@ fn main() -> ! {
                     None => {
                         Text::new("T2 = - ",
                                   Point::new(0, 20),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                     Some(t) => {
                         Text::new(arrform!(128, "T2 = {:.2}", t).as_str(),
                                   Point::new(0, 20),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                 }
@@ -407,13 +383,13 @@ fn main() -> ! {
                     None => {
                         Text::new("T3 = - ",
                                   Point::new(0, 30),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                     Some(t) => {
                         Text::new(arrform!(128, "T3 = {:.2}", t).as_str(),
                                   Point::new(0, 30),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                 }
@@ -422,13 +398,13 @@ fn main() -> ! {
                     None => {
                         Text::new("T4 = - ",
                                   Point::new(0, 40),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                     Some(t) => {
                         Text::new(arrform!(128, "T4 = {:.2}", t).as_str(),
                                   Point::new(0, 40),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                 }
@@ -437,13 +413,13 @@ fn main() -> ! {
                     None => {
                         Text::new("T5 = - ",
                                   Point::new(0, 50),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                     Some(t) => {
                         Text::new(arrform!(128, "T5 = {:.2}", t).as_str(),
                                   Point::new(0, 50),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                         ).draw(&mut display).unwrap();
                     }
                 }
@@ -456,7 +432,7 @@ fn main() -> ! {
 
                 Text::new(arrform!(128, "enc = {:}", pos).as_str(),
                           Point::new(0, 60),
-                          MonoTextStyle::new(&FONT_6X10, BinaryColor::On)
+                          MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                 ).draw(&mut display).unwrap();
 
                 display.flush().unwrap();
@@ -474,10 +450,9 @@ fn main() -> ! {
             let mut interface = Interface::new();
             let mut hk_rate = 500.0;
             let mut hk = true;
-            let mut state = PumpState::Stop;
+            let mut state = State::Idle;
 
             loop {
-
                 match temperature_data_container_usb.lock(Duration::ms(1)) {
                     Ok(temperature_data) => {
                         data = temperature_data.clone();
@@ -503,46 +478,130 @@ fn main() -> ! {
             }
         }).unwrap();
 
-    // Task::new()
-    //     .name("IDLE LED TASK")
-    //     .stack_size(128)
-    //     .priority(TaskPriority(2))
-    //     .start(move || {}).unwrap();
+    Task::new()
+        .name("MAIN TASK")
+        .stack_size(256)
+        .priority(TaskPriority(5))
+        .start(move || {
+            let mut data = MeasuredData::new();
+            let mut out_data = PidData::new();
+            let mut led_state = LedState::Off;
+            let mut interface = Interface::new();
+            let mut state = State::Idle;
+            let max_duty = bldc_pwm.get_max_duty();
+            let pump = PumpData::new();
+            let mut timer = 0;
+
+            loop {
+                match state {
+                    State::Idle => {
+                        bldc_pwm.set_duty(0);
+                        bldc_en.set_high();
+                        led_state = LedState::Off;
+                        if interface.button {
+                            state = State::CoffeeHeating;
+                        }
+                    }
+                    State::CoffeeHeating => {
+                        bldc_pwm.set_duty(max_duty * (pump.heat_up_power / 100.0) as u16);
+                        bldc_en.set_low();
+                        led_state = LedState::SlowSine;
+                        match data.t1 {
+                            None => {}
+                            Some(temperature) => {
+                                if interface.coffee_temperature * 0.95 <= temperature && temperature <= 1.05 * interface.coffee_temperature {
+                                    state = State::Ready;
+                                }
+                            }
+                        }
+                    }
+                    State::Ready => {
+                        bldc_pwm.set_duty(0);
+                        bldc_en.set_high();
+                        led_state = LedState::On;
+                        if interface.lever_switch {
+                            state = State::PreInfuse;
+                            timer = 0;
+                        }
+                    }
+                    State::PreInfuse => {
+                        bldc_pwm.set_duty(max_duty * (pump.pre_infuse_power / 100.0) as u16);
+                        bldc_en.set_low();
+                        led_state = LedState::SlowBlink;
+                        // timer of 5s
+                        if timer >= 100 {
+                            state = State::Extracting;
+                            timer = 0;
+                        }
+
+                    }
+                    State::Extracting => {
+                        bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
+                        bldc_en.set_low();
+                        led_state = LedState::FastBlink;
+                        // timeout of 30s
+                        if timer >= 3000 {
+                            state = State::Ready;
+                        }
+                    }
+                    State::SteamHeating => {
+                        bldc_pwm.set_duty(0);
+                        bldc_en.set_high();
+                        led_state = LedState::SlowSine;
+                        match data.t2 {
+                            None => {}
+                            Some(temperature) => {
+                                if interface.steam_temperature * 0.95 <= temperature && temperature <= 1.05 * interface.steam_temperature {
+                                    state = State::Ready;
+                                }
+                            }
+                        }
+                    }
+                    State::Steaming => {
+                        bldc_pwm.set_duty(max_duty * (pump.steam_power / 100.0) as u16);
+                        bldc_en.set_low();
+                        led_state = LedState::FastBlink;
+                    }
+                }
+                timer += 1;
+                freertos_rust::CurrentTask::delay(Duration::ms(50));
+            }
+        }).unwrap();
 
     Task::new()
         .name("LED TASK")
         .stack_size(128)
         .priority(TaskPriority(0))
         .start(move || {
-            let mut state = State::Idle;
+            let mut state = LedState::Off;
             let max_duty = led_pwm.get_max_duty();
             let mut count = 0;
             loop {
-                count += 10;
                 match state {
-                    State::Idle => {
+                    LedState::Off => {
                         led_pwm.set_duty(0);
                     }
-                    State::Heating => {
+                    LedState::On => {
+                        led_pwm.set_duty(max_duty);
+                    }
+                    LedState::SlowSine => {
                         let val = (max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI)) as u16); // LED1
                         led_pwm.set_duty(val);
                     }
-                    State::Ready => {
-                        led_pwm.set_duty(max_duty);
-                    }
-                    State::PreInfuse => {
+                    LedState::FastBlink => {
                         led_pwm.set_duty(0);
                         freertos_rust::CurrentTask::delay(Duration::ms(250));
                         led_pwm.set_duty(max_duty);
                         freertos_rust::CurrentTask::delay(Duration::ms(225));
                     }
-                    State::Extracting => {
+                    LedState::SlowBlink => {
                         led_pwm.set_duty(0);
                         freertos_rust::CurrentTask::delay(Duration::ms(500));
                         led_pwm.set_duty(max_duty);
                         freertos_rust::CurrentTask::delay(Duration::ms(475));
                     }
                 }
+                count += 10;
                 freertos_rust::CurrentTask::delay(Duration::ms(25));
             }
         }).unwrap();
@@ -626,28 +685,18 @@ unsafe fn DefaultHandler(_irqn: i16) {
 // custom default handler
 // irqn is negative for Cortex-M exceptions
 // irqn is positive for device specific (line IRQ)
-// set_led(true);(true);
 // panic!("Exception: {}", irqn);
 }
 
 #[exception]
 #[allow(non_snake_case)]
 unsafe fn HardFault(_ef: &ExceptionFrame) -> ! {
-// Blink 3 times long when exception occures
-    //delay_n(10);
-    for _ in 0..3 {
-        // set_led(true);
-        // delay_n(1000);
-        // set_led(false);
-        // delay_n(555);
-    }
     loop {}
 }
 
 // define what happens in an Out Of Memory (OOM) condition
 #[alloc_error_handler]
 fn alloc_error(_layout: Layout) -> ! {
-    //set_led(true);
     asm::bkpt();
     loop {}
 }

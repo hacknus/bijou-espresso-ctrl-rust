@@ -1,7 +1,7 @@
 use arrform::{arrform, ArrForm};
 use cortex_m::asm::delay;
 use crate::{usb_println};
-use crate::utils::{Interface, PidData, PumpState, MeasuredData};
+use crate::utils::{Interface, PidData, MeasuredData, State};
 
 fn get_last_index(cmd: &str) -> usize {
     let mut index: usize = 0;
@@ -16,7 +16,7 @@ fn get_last_index(cmd: &str) -> usize {
 }
 
 pub fn extract_command(
-    state: &mut PumpState,
+    state: &mut State,
     cmd: &str,
     hk: &mut bool,
     hk_rate: &mut f32,
@@ -63,6 +63,14 @@ pub fn extract_command(
                     usb_println(arrform!(64,"[ACK] error = {:?}", err).as_str());
                 }
             }
+        } else if cmd.contains("[CMD] openValve1") {
+            cmd_ok();
+        } else if cmd.contains("[CMD] closeValve1") {
+            cmd_ok();
+        } else if cmd.contains("[CMD] openValve2") {
+            cmd_ok();
+        } else if cmd.contains("[CMD] closeValve2") {
+            cmd_ok();
         } else if cmd.contains("[CMD] stopHeating") {
             cmd_ok();
         } else if cmd.contains("[CMD] stopPump") {
@@ -114,12 +122,10 @@ pub fn send_housekeeping(
 ) {
     let hk = arrform!(
         128,
-        "[HK] {:?}, {}, {}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}",
+        "[HK] {:?}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}",
         interface.state,
-        interface.extraction_triggered,
         interface.lever_switch,
         interface.steam_open,
-        interface.steam_triggered,
         interface.water_low,
         temperatures.t1.unwrap_or(0.0),
         temperatures.t2.unwrap_or(0.0),
