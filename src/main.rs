@@ -31,7 +31,7 @@ use crate::led::LED;
 use crate::usb::{usb_init, usb_print, usb_println, usb_read};
 use crate::max31865::MAX31865;
 use crate::pid::PID;
-use crate::tasks::{blink_led_1_task, blink_led_2_task, print_usb_task};
+use micromath::F32Ext;
 
 use embedded_graphics::{
     pixelcolor::BinaryColor,
@@ -77,7 +77,6 @@ mod usb;
 mod i2c;
 mod commands;
 mod intrpt;
-mod tasks;
 mod pid;
 mod utils;
 mod devices;
@@ -126,6 +125,8 @@ fn main() -> ! {
     let mut cs_1 = gpiod.pd13.into_push_pull_output();
     let mut bldc_en = gpioa.pa8.into_push_pull_output();
     let mut bldc_dir = gpioc.pc9.into_push_pull_output();
+    bldc_dir.set_low();
+
     let mut buzz = gpioa.pa3.into_alternate();
     let mut led_dim = gpiob.pb1.into_alternate();
     let mut heater_1 = gpioc.pc6.into_alternate();
@@ -246,6 +247,8 @@ fn main() -> ! {
 
     delay.delay(1000.millis());
     usb_println("boot up ok");
+    fault_1_led.on();
+    fault_2_led.on();
     delay.delay(100.millis());
 
     Task::new()
@@ -288,13 +291,12 @@ fn main() -> ! {
 
     Task::new()
         .name("PID TASK")
-        .stack_size(256)
+        .stack_size(512)
         .priority(TaskPriority(3))
         .start(move || {
             let mut pid = PID::new();
             loop {
                 let mut current_temperature = None;
-                let mut pwm_val = 0.0;
                 match temperature_data_container_pid.lock(Duration::ms(1)) {
                     Ok(temperature_data) => {
                         current_temperature = temperature_data.t5;
@@ -305,6 +307,7 @@ fn main() -> ! {
                     None => {}
                     Some(t) => {
                         // TODO: convert this to duty-cycle of PWM (ceiling and floor?)
+                        let mut pwm_val = 0.0;
                         pwm_val = pid.calculate(t, tick_timer.now().ticks());
                     }
                 }
@@ -442,7 +445,7 @@ fn main() -> ! {
 
     Task::new()
         .name("USB TASK")
-        .stack_size(512)
+        .stack_size(1024)
         .priority(TaskPriority(3))
         .start(move || {
             let mut data = MeasuredData::new();
@@ -480,8 +483,8 @@ fn main() -> ! {
 
     Task::new()
         .name("MAIN TASK")
-        .stack_size(256)
-        .priority(TaskPriority(5))
+        .stack_size(512)
+        .priority(TaskPriority(2))
         .start(move || {
             let mut data = MeasuredData::new();
             let mut out_data = PidData::new();
@@ -564,13 +567,16 @@ fn main() -> ! {
                     }
                 }
                 timer += 1;
+                if timer >= 10000 {
+                    timer = 1;
+                }
                 freertos_rust::CurrentTask::delay(Duration::ms(50));
             }
         }).unwrap();
 
     Task::new()
         .name("LED TASK")
-        .stack_size(128)
+        .stack_size(256)
         .priority(TaskPriority(0))
         .start(move || {
             let mut state = LedState::Off;
@@ -585,7 +591,7 @@ fn main() -> ! {
                         led_pwm.set_duty(max_duty);
                     }
                     LedState::SlowSine => {
-                        let val = (max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI)) as u16); // LED1
+                        let val = (max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI).sin()) as u16); // LED1
                         led_pwm.set_duty(val);
                     }
                     LedState::FastBlink => {
