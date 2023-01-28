@@ -18,10 +18,7 @@ fn extract_value(cmd: &str) -> Option<f32> {
         end_index = cmd.len();
     }
     let v = &cmd[start_index..end_index];
-    match v.parse::<f32>() {
-        Ok(val) => { Some(val) }
-        Err(_) => { None }
-    }
+    v.parse::<f32>().ok()
 }
 
 pub fn extract_command(
