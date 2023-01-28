@@ -34,7 +34,7 @@ pub fn extract_command(
         if cmd.contains("[CMD] setCoffeeTemperature=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set coffee temperature = {}", val).as_str());
@@ -43,7 +43,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setSteamTemperature=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set steam temperature = {}", val).as_str());
@@ -52,7 +52,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] triggerExtraction=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, triggering extraction for = {} seconds", val).as_str());
@@ -61,7 +61,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setP=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set p value = {}", val).as_str());
@@ -70,7 +70,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setI=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set i value = {}", val).as_str());
@@ -79,7 +79,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setD=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set d value = {}", val).as_str());
@@ -88,7 +88,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setWindowSize=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set window size = {}", val).as_str());
@@ -97,7 +97,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setPIDMaxVal=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set PID max value = {}", val).as_str());
@@ -106,7 +106,7 @@ pub fn extract_command(
         } else if cmd.contains("[CMD] setPumpSpeed=") {
             match extract_value(cmd) {
                 None => {
-                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                    cmd_has_no_value();
                 }
                 Some(val) => {
                     usb_println(arrform!(64,"[ACK] cmd OK, set pump speed = {}", val).as_str());
@@ -137,7 +137,7 @@ pub fn extract_command(
                 Some(r) => {
                     if r <= 100.0 {
                         *hk_period = 1000.0 / r;
-                        usb_println(arrform!(64,"[ACK] cmd OK, val = {}", r).as_str());
+                        cmd_has_no_value();
                     } else {
                         usb_println(arrform!(64,"[ACK] error, value = {} is too large (> 100)", r).as_str());
                     }
@@ -159,6 +159,10 @@ pub fn cmd_failed() {
 
 pub fn cmd_ok() {
     usb_println("[ACK] OK command valid");
+}
+
+pub fn cmd_has_no_value() {
+    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
 }
 
 pub fn send_housekeeping(
