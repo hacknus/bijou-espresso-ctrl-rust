@@ -129,8 +129,8 @@ fn main() -> ! {
 
     let mut buzz = gpioa.pa3.into_alternate();
     let mut led_dim = gpiob.pb1.into_alternate();
-    let mut heater_1 = gpioc.pc6.into_alternate();
-    let mut heater_2 = gpioc.pc7.into_alternate();
+    let mut heater_1 = gpioc.pc6.into_push_pull_output();
+    let mut heater_2 = gpioc.pc7.into_push_pull_output();
     let mut bldc_v = gpioc.pc8.into_alternate();
 
     let mut enc_pin_a = gpioe.pe11.into_floating_input();
@@ -156,7 +156,7 @@ fn main() -> ! {
     buzz_pwm.set_duty(Channel::C4, max_duty / 2);
 
     // initialize pwm timer 3
-    let (mut heater_1_pwm, mut heater_2_pwm, mut bldc_pwm, mut led_pwm) = dp.TIM3.pwm_hz((heater_1, heater_2, bldc_v, led_dim), 10000.Hz(), &clocks).split();
+    let ( mut bldc_pwm, mut led_pwm) = dp.TIM3.pwm_hz((bldc_v, led_dim), 10000.Hz(), &clocks).split();
 
     // initialize dimming LED
     let max_duty = led_pwm.get_max_duty();
@@ -165,14 +165,6 @@ fn main() -> ! {
     // initialize bldc pwm
     let max_duty = bldc_pwm.get_max_duty();
     bldc_pwm.set_duty(max_duty / 2);
-
-    // initialize heater_1
-    let max_duty = heater_1_pwm.get_max_duty();
-    heater_1_pwm.set_duty(max_duty / 2);
-
-    // initialize heater_2
-    let max_duty = heater_2_pwm.get_max_duty();
-    heater_2_pwm.set_duty(max_duty / 2);
 
     // initialize usb
     let usb = USB {
@@ -238,7 +230,7 @@ fn main() -> ! {
         &clocks,
     );
 
-    let temperature_data = MeasuredData::new();
+    let temperature_data = MeasuredData::default();
     let temperature_data_container = Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
     let temperature_data_container_display = temperature_data_container.clone();
     let temperature_data_container_adc = temperature_data_container.clone();
@@ -306,12 +298,25 @@ fn main() -> ! {
                 match current_temperature {
                     None => {}
                     Some(t) => {
-                        // TODO: convert this to duty-cycle of PWM (ceiling and floor?)
-                        let mut pwm_val = 0.0;
-                        pwm_val = pid.calculate(t, tick_timer.now().ticks());
+                        // we use a window and set the pin high for the calculated duty_cycle,
+                        // this is not really PWM, since the solid state relay only switches at zero-crossing
+                        // so we cannot use high frequency pwm
+                        // since the heating process is slow, it is okay to have a larger window size
+                        let duty_cycle= pid.get_heat_value(t, tick_timer.now().ticks());
+                        let now = tick_timer.now().ticks();
+                        heater_1.set_high();
+                        while now + duty_cycle > tick_timer.now().ticks() {
+                            // heater switches at zero crossing, so we wait for one cycle 1/50Hz = 20ms
+                            freertos_rust::CurrentTask::delay(Duration::ms(20));
+                        }
+                        heater_1.set_low();
+                        while now + pid.window_size > tick_timer.now().ticks() {
+                            // heater switches at zero crossing, so we wait for one cycle 1/50Hz = 20ms
+                            freertos_rust::CurrentTask::delay(Duration::ms(20));
+                        }
                     }
                 }
-                freertos_rust::CurrentTask::delay(Duration::ms(1000));
+                freertos_rust::CurrentTask::delay(Duration::ms(1));
             }
         }).unwrap();
 
@@ -448,9 +453,9 @@ fn main() -> ! {
         .stack_size(1024)
         .priority(TaskPriority(3))
         .start(move || {
-            let mut data = MeasuredData::new();
-            let mut out_data = PidData::new();
-            let mut interface = Interface::new();
+            let mut data = MeasuredData::default();
+            let mut out_data = PidData::default();
+            let mut interface = Interface::default();
             let mut hk_rate = 500.0;
             let mut hk = true;
             let mut state = State::Idle;
@@ -486,13 +491,13 @@ fn main() -> ! {
         .stack_size(512)
         .priority(TaskPriority(2))
         .start(move || {
-            let mut data = MeasuredData::new();
-            let mut out_data = PidData::new();
+            let mut data = MeasuredData::default();
+            let mut out_data = PidData::default();
             let mut led_state = LedState::Off;
-            let mut interface = Interface::new();
+            let mut interface = Interface::default();
             let mut state = State::Idle;
             let max_duty = bldc_pwm.get_max_duty();
-            let pump = PumpData::new();
+            let pump = PumpData::default();
             let mut timer = 0;
 
             loop {

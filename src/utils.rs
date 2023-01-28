@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MeasuredData {
     pub t1: Option<f32>,
     pub t2: Option<f32>,
@@ -8,18 +8,6 @@ pub struct MeasuredData {
     pub p: Option<f32>,
 }
 
-impl MeasuredData {
-    pub fn new() -> Self {
-        MeasuredData {
-            t1: None,
-            t2: None,
-            t3: None,
-            t4: None,
-            t5: None,
-            p: None,
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct PumpData {
@@ -31,8 +19,8 @@ pub struct PumpData {
     pub enable: bool,
 }
 
-impl PumpData {
-    pub fn new() -> Self {
+impl Default for PumpData {
+    fn default() -> Self {
         PumpData {
             heat_up_power: 10.0,
             pre_infuse_power: 30.0,
@@ -56,8 +44,8 @@ pub struct PidData {
     pub pwm_val: Option<u32>,
 }
 
-impl PidData {
-    pub fn new() -> Self {
+impl Default for PidData {
+    fn default() -> Self {
         PidData {
             p: None,
             i: None,
@@ -104,8 +92,8 @@ pub struct Interface {
     pub valve2: bool,
 }
 
-impl Interface {
-    pub fn new() -> Self {
+impl Default for Interface {
+    fn default() -> Self {
         Interface {
             state: State::Idle,
             coffee_temperature: 92.0,

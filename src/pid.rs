@@ -8,9 +8,12 @@ pub struct PID {
     pub kp: f32,
     pub ki: f32,
     pub kd: f32,
+    pub val: f32,
     error: f32,
     prev_time: u32,
     pub target: f32,
+    pub window_size: u32,
+    pub max_val: f32
 }
 
 
@@ -23,9 +26,12 @@ impl PID {
             kp: 1.0,
             ki: 1.0,
             kd: 1.0,
+            val: 0.0,
             error: 0.0,
             prev_time: 0,
             target: 90.0,
+            window_size: 500,
+            max_val: 100.0,
         }
     }
 
@@ -36,6 +42,17 @@ impl PID {
         self.d = self.kd * (current_error - self.error) / (now - self.prev_time) as f32;
         self.error = current_error;
         self.prev_time = now;
-        self.p + self.i + self.d
+        self.val = self.p + self.i + self.d;
+        self.val
+    }
+
+    pub fn get_heat_value(&mut self, temperature: f32, now: u32) -> u32 {
+        let mut pid_val = self.calculate(temperature, now);
+        if pid_val < 0.0 {
+            pid_val = 0.0;
+        } else if pid_val > self.max_val {
+            pid_val = self.max_val;
+        }
+        (pid_val / self.max_val * self.window_size as f32) as u32
     }
 }

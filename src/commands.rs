@@ -3,64 +3,113 @@ use cortex_m::asm::delay;
 use crate::{usb_println};
 use crate::utils::{Interface, PidData, MeasuredData, State};
 
-fn get_last_index(cmd: &str) -> usize {
-    let mut index: usize = 0;
-    for i in 0..cmd.len() {
-        if &cmd[i..i + 2] == "  " {
-            index = i;
+fn extract_value(cmd: &str) -> Option<f32> {
+    let mut start_index = 0;
+    let mut end_index = 0;
+    for (i, char) in cmd.bytes().enumerate() {
+        if char == b'=' {
+            start_index = i + 1;
+        } else if !b"-0123456789.".contains(&char) && start_index != 0 && start_index != i {
+            end_index = i;
             break;
         }
-        index = i;
     }
-    index
+    if end_index == 0 {
+        end_index = cmd.len();
+    }
+    let v = &cmd[start_index..end_index];
+    match v.parse::<f32>() {
+        Ok(val) => { Some(val) }
+        Err(_) => { None }
+    }
 }
 
 pub fn extract_command(
     state: &mut State,
     cmd: &str,
     hk: &mut bool,
-    hk_rate: &mut f32,
+    hk_period: &mut f32,
 ) {
     if cmd.contains("[CMD]") {
         if cmd.contains("[CMD] setCoffeeTemperature=") {
-            let val: f32;
-            let index = get_last_index(cmd);
-            usb_println(arrform!(64,"index = {}", index).as_str());
-            match cmd[27..index].parse::<f32>() {
-                Ok(s) => {
-                    val = s;
-                    //*state = PumpState::Heating(val);
-                    usb_println(arrform!(64,"[ACK] cmd OK, set coffee temperature = {}", s).as_str());
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
                 }
-                Err(err) => {
-                    usb_println(arrform!(64,"[ACK] error = {:?}", err).as_str());
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set coffee temperature = {}", val).as_str());
                 }
             }
         } else if cmd.contains("[CMD] setSteamTemperature=") {
-            let val: f32;
-            let index = get_last_index(cmd);
-            match cmd[26..index].parse::<f32>() {
-                Ok(s) => {
-                    val = s;
-                    //*state = PumpState::Heating(val);
-                    usb_println(arrform!(64,"[ACK] cmd OK, set steam temperature = {}", s).as_str());
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
                 }
-                Err(err) => {
-                    usb_println(arrform!(64,"[ACK] error = {:?}", err).as_str());
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set steam temperature = {}", val).as_str());
                 }
             }
         } else if cmd.contains("[CMD] triggerExtraction=") {
-            let val: f32;
-            let index = get_last_index(cmd);
-            match cmd[24..index].parse::<f32>() {
-                Ok(s) => {
-                    val = s;
-                    // 400 Hz corresponds to 1 mm/s movement
-                    //*state = PumpState::Extracting(val as u32);
-                    usb_println(arrform!(64,"[ACK] cmd OK, start extracting for {} seconds", s).as_str());
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
                 }
-                Err(err) => {
-                    usb_println(arrform!(64,"[ACK] error = {:?}", err).as_str());
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, triggering extraction for = {} seconds", val).as_str());
+                }
+            }
+        } else if cmd.contains("[CMD] setP=") {
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                }
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set p value = {}", val).as_str());
+                }
+            }
+        } else if cmd.contains("[CMD] setI=") {
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                }
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set i value = {}", val).as_str());
+                }
+            }
+        } else if cmd.contains("[CMD] setD=") {
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                }
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set d value = {}", val).as_str());
+                }
+            }
+        } else if cmd.contains("[CMD] setWindowSize=") {
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                }
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set window size = {}", val).as_str());
+                }
+            }
+        } else if cmd.contains("[CMD] setPIDMaxVal=") {
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                }
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set PID max value = {}", val).as_str());
+                }
+            }
+        } else if cmd.contains("[CMD] setPumpSpeed=") {
+            match extract_value(cmd) {
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+                }
+                Some(val) => {
+                    usb_println(arrform!(64,"[ACK] cmd OK, set pump speed = {}", val).as_str());
                 }
             }
         } else if cmd.contains("[CMD] openValve1") {
@@ -84,19 +133,17 @@ pub fn extract_command(
             *hk = true;
             cmd_ok();
         } else if cmd.contains("[CMD] set hk rate=") {
-            let index = get_last_index(cmd);
-            match cmd[18..index].parse::<f32>() {
-                Ok(r) => {
-                    if r <= 10.0 {
-                        *hk_rate = 1000.0 / r;
+            match extract_value(cmd) {
+                Some(r) => {
+                    if r <= 100.0 {
+                        *hk_period = 1000.0 / r;
                         usb_println(arrform!(64,"[ACK] cmd OK, val = {}", r).as_str());
-
                     } else {
-                        usb_println(arrform!(64,"[ACK] error, value = {} is too large (> 10)", r).as_str());
+                        usb_println(arrform!(64,"[ACK] error, value = {} is too large (> 100)", r).as_str());
                     }
                 }
-                Err(err) => {
-                    usb_println(arrform!(64,"[ACK] error = {:?}", err).as_str());
+                None => {
+                    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
                 }
             }
         } else {
