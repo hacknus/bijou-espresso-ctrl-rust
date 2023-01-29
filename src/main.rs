@@ -24,9 +24,7 @@ use freertos_rust::*;
 use core::alloc::Layout;
 use core::f32::consts::PI;
 use stm32f4xx_hal::dwt::DwtExt;
-use usb_device::UsbError;
 
-use crate::i2c::i2c1_init;
 use crate::led::LED;
 use crate::usb::{usb_init, usb_print, usb_println, usb_read};
 use crate::max31865::MAX31865;
@@ -51,14 +49,14 @@ use embedded_graphics::{
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use stm32f4xx_hal::{
     pac::I2C1,
-    i2c::{Mode as i2cMode, Error as I2CError, I2c},
+    i2c::{Mode as i2cMode, I2c},
     gpio::{PB6, PB7},
     rcc::Clocks,
     prelude::*,
 };
 use stm32f4xx_hal::{
     pac::SPI2,
-    spi::{Error as SPIError, Spi, Phase, Polarity, Mode as spiMode},
+    spi::{Spi, Phase, Polarity, Mode as spiMode},
     gpio::{Output, PB13, PB14, PB15, Pin},
     prelude::*,
 };
@@ -74,7 +72,6 @@ use devices::max31865;
 use crate::commands::{extract_command, send_housekeeping};
 
 mod usb;
-mod i2c;
 mod commands;
 mod intrpt;
 mod pid;
@@ -89,7 +86,7 @@ static GLOBAL: FreeRtosAllocator = FreeRtosAllocator;
 #[entry]
 fn main() -> ! {
     let mut dp = pac::Peripherals::take().unwrap();
-    let mut cp = cortex_m::peripheral::Peripherals::take().unwrap();
+    let cp = cortex_m::peripheral::Peripherals::take().unwrap();
 
     let rcc = dp.RCC.constrain();
 
@@ -118,24 +115,24 @@ fn main() -> ! {
     let gpioe = dp.GPIOE.split();
 
     // initialize pins
-    let mut cs_5 = gpiod.pd14.into_push_pull_output();
-    let mut cs_4 = gpiod.pd10.into_push_pull_output();
-    let mut cs_3 = gpiod.pd11.into_push_pull_output();
-    let mut cs_2 = gpiod.pd12.into_push_pull_output();
-    let mut cs_1 = gpiod.pd13.into_push_pull_output();
+    let cs_5 = gpiod.pd14.into_push_pull_output();
+    let cs_4 = gpiod.pd10.into_push_pull_output();
+    let cs_3 = gpiod.pd11.into_push_pull_output();
+    let cs_2 = gpiod.pd12.into_push_pull_output();
+    let cs_1 = gpiod.pd13.into_push_pull_output();
     let mut bldc_en = gpioa.pa8.into_push_pull_output();
     let mut bldc_dir = gpioc.pc9.into_push_pull_output();
     bldc_dir.set_low();
 
-    let mut buzz = gpioa.pa3.into_alternate();
-    let mut led_dim = gpiob.pb1.into_alternate();
+    let buzz = gpioa.pa3.into_alternate();
+    let led_dim = gpiob.pb1.into_alternate();
     let mut heater_1 = gpioc.pc6.into_push_pull_output();
     let mut heater_2 = gpioc.pc7.into_push_pull_output();
-    let mut bldc_v = gpioc.pc8.into_alternate();
+    let bldc_v = gpioc.pc8.into_alternate();
 
-    let mut enc_pin_a = gpioe.pe11.into_floating_input();
+    let enc_pin_a = gpioe.pe11.into_floating_input();
     let mut enc_pin_b = gpioe.pe9.into_floating_input();
-    let mut enc_pin_sw = gpioe.pe10.into_floating_input();
+    let enc_pin_sw = gpioe.pe10.into_floating_input();
     let mut syscfg = dp.SYSCFG.constrain();
     enc_pin_b.make_interrupt_source(&mut syscfg);
     enc_pin_b.trigger_on_edge(&mut dp.EXTI, Edge::RisingFalling);
@@ -148,7 +145,7 @@ fn main() -> ! {
     let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize switch
-    let mut sw = gpiob.pb0.into_floating_input();
+    let sw = gpiob.pb0.into_floating_input();
 
     // initialize buzzer
     let mut buzz_pwm = dp.TIM2.pwm_hz(buzz, 2000.Hz(), &clocks);
@@ -596,7 +593,7 @@ fn main() -> ! {
                         led_pwm.set_duty(max_duty);
                     }
                     LedState::SlowSine => {
-                        let val = (max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI).sin()) as u16); // LED1
+                        let val = max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI).sin()) as u16; // LED1
                         led_pwm.set_duty(val);
                     }
                     LedState::FastBlink => {
@@ -713,7 +710,7 @@ fn alloc_error(_layout: Layout) -> ! {
 }
 
 #[no_mangle]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, unused_variables)]
 fn vApplicationStackOverflowHook(pxTask: FreeRtosTaskHandle, pcTaskName: FreeRtosCharPtr) {
     asm::bkpt();
 }

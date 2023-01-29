@@ -1,11 +1,7 @@
-use arrform::{arrform, ArrForm};
-use cortex_m::asm::delay;
-use crate::usb_println;
 use stm32f4xx_hal::{
     pac::SPI2,
-    spi::{Error, Spi, Phase, Polarity, Mode as spiMode},
+    spi::{Error, Spi},
     gpio::{Output, PB13, PB14, PB15, Pin},
-    rcc::Clocks,
     prelude::*,
 };
 
@@ -27,12 +23,11 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
     }
 
     pub fn init(&mut self, spi: &mut Spi<SPI2, (PB13, PB14, PB15)>) {
-        let mut data = 0b0;
-        if self.wires == 3 {
-            data = 0b11010000; // 3 wire
+        let data = if self.wires == 3 {
+            0b11010000 // 3 wire
         } else {
-            data = 0b11000000; // 2 or 4 wire
-        }
+            0b11000000 // 2 or 4 wire
+        };
 
         self.write(spi, 0x00, data).unwrap();
     }
@@ -40,7 +35,7 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
     pub fn get_raw_resistance(&mut self, spi: &mut Spi<SPI2, (PB13, PB14, PB15)>) -> u16 {
         let mut buffer = [0; 3];  // first entry is register addr, next two will be data
         self.read(spi, 0x01, &mut buffer).unwrap();
-        let mut data: u16 = (buffer[1] as u16) << 8 | (buffer[2] as u16) ;
+        let data: u16 = (buffer[1] as u16) << 8 | (buffer[2] as u16);
         data >> 1
     }
 
@@ -62,11 +57,12 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
         //usb_println(arrform!(64,"read cmd buffer {:?}", buffer).as_str());
         self.cs_pin.set_low();
         match spi.transfer(buffer) {
-            Ok(r) => {
+            Ok(_) => {
                 // usb_println(arrform!(64,"read answer {:?}",r).as_str());
             }
             Err(err) => {
                 // usb_println(arrform!(64, "spi failed to read = {:?}", err).as_str());
+                return Err(err);
             }
         }
         self.cs_pin.set_high();
@@ -78,11 +74,12 @@ impl<const PC: char, const NC: u8> MAX31865<PC, NC> {
         let mut buffer: [u8; 2] = [register | 0x80, payload];
         self.cs_pin.set_low();
         match spi.transfer(&mut buffer) {
-            Ok(r) => {
+            Ok(_) => {
                 // usb_println(arrform!(64,"write answer {:?}",r).as_str());
             }
             Err(err) => {
                 // usb_println(arrform!(64, "spi failed to write = {:?}", err).as_str());
+                return Err(err);
             }
         }
         self.cs_pin.set_high();

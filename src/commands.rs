@@ -1,15 +1,14 @@
 use arrform::{arrform, ArrForm};
-use cortex_m::asm::delay;
 use crate::{usb_println};
 use crate::utils::{Interface, PidData, MeasuredData, State};
 
 fn extract_value(cmd: &str) -> Option<f32> {
     let mut start_index = 0;
     let mut end_index = 0;
-    for (i, char) in cmd.bytes().enumerate() {
-        if char == b'=' {
+    for (i, char) in cmd.char_indices() {
+        if char == '=' {
             start_index = i + 1;
-        } else if !b"-0123456789.".contains(&char) && start_index != 0 && start_index != i {
+        } else if !"-0123456789.".contains(char) && start_index != 0 && start_index != i {
             end_index = i;
             break;
         }
@@ -117,19 +116,23 @@ pub fn extract_command(
             cmd_ok();
         } else if cmd.contains("[CMD] closeValve2") {
             cmd_ok();
+        } else if cmd.contains("[CMD] startHeating") {
+            cmd_ok();
         } else if cmd.contains("[CMD] stopHeating") {
+            cmd_ok();
+        } else if cmd.contains("[CMD] startPump") {
             cmd_ok();
         } else if cmd.contains("[CMD] stopPump") {
             cmd_ok();
         } else if cmd.contains("[CMD] stopAll") {
             cmd_ok();
-        } else if cmd.contains("[CMD] disable hk") {
+        } else if cmd.contains("[CMD] disableHK") {
             *hk = false;
             cmd_ok();
-        } else if cmd.contains("[CMD] enable hk") {
+        } else if cmd.contains("[CMD] enableHK") {
             *hk = true;
             cmd_ok();
-        } else if cmd.contains("[CMD] set hk rate=") {
+        } else if cmd.contains("[CMD] setHKRate=") {
             match extract_value(cmd) {
                 Some(r) => {
                     if r <= 100.0 {

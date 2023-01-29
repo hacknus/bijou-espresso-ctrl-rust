@@ -5,6 +5,7 @@ pub struct LED<const P: char, const N: u8> {
     state: bool,
 }
 
+#[allow(dead_code)]
 impl<const P: char, const N: u8> LED<P, N> {
     pub fn new(
         pin: Pin<P, N, Output>) -> Self {

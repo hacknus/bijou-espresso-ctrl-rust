@@ -1,7 +1,6 @@
 use core::cell::RefCell;
-use arrform::{arrform, ArrForm};
 use cortex_m::interrupt::Mutex;
-use stm32f4xx_hal::otg_fs::{UsbBus, USB, UsbBusType};
+use stm32f4xx_hal::otg_fs::{UsbBus, USB};
 use stm32f4xx_hal::pac::{interrupt};
 use usb_device::prelude::*;
 use usb_device::bus::UsbBusAllocator;
@@ -15,12 +14,13 @@ pub static G_USB_SERIAL: Mutex<RefCell<Option<SerialPort<UsbBus<USB>>>>> =
 pub static G_USB_DEVICE: Mutex<RefCell<Option<UsbDevice<UsbBus<USB>>>>> =
     Mutex::new(RefCell::new(None));
 
+#[allow(dead_code)]
 pub unsafe fn usb_init(usb: USB){
     static mut EP_MEMORY: [u32; 1024] = [0; 1024];
     static mut USB_BUS: Option<UsbBusAllocator<stm32f4xx_hal::otg_fs::UsbBusType>> = None;
     USB_BUS = Some(stm32f4xx_hal::otg_fs::UsbBusType::new(usb, &mut EP_MEMORY));
-    let mut usb_bus = USB_BUS.as_ref().unwrap();
-    let mut serial_port = SerialPort::new(&usb_bus);
+    let usb_bus = USB_BUS.as_ref().unwrap();
+    let serial_port = SerialPort::new(&usb_bus);
     let usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x17c0, 0x28dd))
         .manufacturer("Linus Leo Stoeckli")
         .product("Bijou Espresso")
@@ -33,6 +33,7 @@ pub unsafe fn usb_init(usb: USB){
     });
 }
 
+#[allow(dead_code)]
 pub fn usb_read(message: &mut [u8; 1024]) -> bool {
     cortex_m::interrupt::free(|cs| {
         *message = [0; 1024];
@@ -48,6 +49,7 @@ pub fn usb_read(message: &mut [u8; 1024]) -> bool {
     })
 }
 
+#[allow(dead_code)]
 pub fn usb_println(string: &str) -> bool {
     cortex_m::interrupt::free(|cs| {
         match G_USB_SERIAL.borrow(cs).borrow_mut().as_mut() {
@@ -66,6 +68,7 @@ pub fn usb_println(string: &str) -> bool {
     })
 }
 
+#[allow(dead_code)]
 pub fn usb_print(string: &str) {
     cortex_m::interrupt::free(|cs| {
         match G_USB_SERIAL.borrow(cs).borrow_mut().as_mut() {
@@ -78,6 +81,7 @@ pub fn usb_print(string: &str) {
 }
 
 #[interrupt]
+#[allow(non_snake_case)]
 fn OTG_FS() {
     cortex_m::interrupt::free(|cs| {
         match G_USB_DEVICE.borrow(cs).borrow_mut().as_mut() {

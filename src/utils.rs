@@ -79,6 +79,12 @@ pub enum LedState {
     FastBlink,
 }
 
+#[derive(Debug, Clone)]
+pub enum PumpState {
+    Off,
+    On(u32),
+}
+
 #[derive(Clone)]
 pub struct Interface {
     pub state: State,
