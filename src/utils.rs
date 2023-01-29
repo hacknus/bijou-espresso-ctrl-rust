@@ -34,27 +34,33 @@ impl Default for PumpData {
 
 #[derive(Clone)]
 pub struct PidData {
-    pub p: Option<f32>,
-    pub i: Option<f32>,
-    pub d: Option<f32>,
+    pub p: f32,
+    pub i: f32,
+    pub d: f32,
     pub kp: f32,
     pub ki: f32,
     pub kd: f32,
+    pub window_size: u32,
+    pub max_val: f32,
     pub enable: bool,
-    pub pwm_val: Option<u32>,
+    pub pid_val: f32,
+    pub duty_cycle: u32,
 }
 
 impl Default for PidData {
     fn default() -> Self {
         PidData {
-            p: None,
-            i: None,
-            d: None,
+            p: 0.0,
+            i: 0.0,
+            d: 0.0,
             kp: 1.0,
             ki: 1.0,
             kd: 1.0,
+            window_size: 0,
+            max_val: 0.0,
             enable: false,
-            pwm_val: None,
+            pid_val: 0.0,
+            duty_cycle: 0,
         }
     }
 }
@@ -79,17 +85,12 @@ pub enum LedState {
     FastBlink,
 }
 
-#[derive(Debug, Clone)]
-pub enum PumpState {
-    Off,
-    On(u32),
-}
 
 #[derive(Clone)]
 pub struct Interface {
-    pub state: State,
     pub coffee_temperature: f32,
     pub steam_temperature: f32,
+    pub trigger_extraction: bool,
     pub lever_switch: bool,
     pub button: bool,
     pub steam_open: bool,
@@ -101,9 +102,9 @@ pub struct Interface {
 impl Default for Interface {
     fn default() -> Self {
         Interface {
-            state: State::Idle,
             coffee_temperature: 92.0,
             steam_temperature: 120.0,
+            trigger_extraction: false,
             lever_switch: false,
             button: false,
             steam_open: false,

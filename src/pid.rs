@@ -7,6 +7,7 @@ pub struct PID {
     pub ki: f32,
     pub kd: f32,
     pub val: f32,
+    pub duty_cycle: u32,
     error: f32,
     prev_time: u32,
     pub target: f32,
@@ -25,6 +26,7 @@ impl PID {
             ki: 1.0,
             kd: 1.0,
             val: 0.0,
+            duty_cycle: 0,
             error: 0.0,
             prev_time: 0,
             target: 90.0,
@@ -51,6 +53,7 @@ impl PID {
         } else if pid_val > self.max_val {
             pid_val = self.max_val;
         }
-        (pid_val / self.max_val * self.window_size as f32) as u32
+        self.duty_cycle = (pid_val / self.max_val * self.window_size as f32) as u32;
+        self.duty_cycle
     }
 }
