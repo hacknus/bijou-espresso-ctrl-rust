@@ -189,7 +189,7 @@ pub fn extract_command(
                 Some(r) => {
                     if r <= 100.0 {
                         *hk_period = 1000.0 / r;
-                        usb_println(arrform!(64,"[ACK] cmd OK, set HK rate = {}", val).as_str());
+                        usb_println(arrform!(64,"[ACK] cmd OK, set HK rate = {}", r).as_str());
                     } else {
                         usb_println(arrform!(64,"[ACK] error, value = {} is too large (> 100)", r).as_str());
                     }
