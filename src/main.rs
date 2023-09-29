@@ -373,8 +373,7 @@ fn main() -> ! {
 
                 if let Ok(cmd) = heater_command_queue_pid.receive(Duration::infinite()) {
                     match cmd {
-                        HeaterCommand::CoffeeTemperature(temperature) => pid.target = temperature,
-                        HeaterCommand::SteamTemperature(_) => {}
+                        HeaterCommand::Temperature(temperature) => pid.target = temperature,
                         HeaterCommand::Heating(enable) => pid.enabled = enable,
                         HeaterCommand::WindowSize(window_size) => {
                             pid.window_size = window_size as u32;
@@ -384,7 +383,6 @@ fn main() -> ! {
                         HeaterCommand::PidD(kd) => pid.kd = kd,
                         HeaterCommand::PidMaxVal(max_val) => pid.max_val = max_val,
                         HeaterCommand::Boiler1(boiler_1) => boiler_override = boiler_1,
-                        HeaterCommand::Boiler2(_) => {}
                     }
                 }
 
