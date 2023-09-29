@@ -33,6 +33,9 @@ impl Default for PumpData {
 
 #[derive(Clone)]
 pub struct PidData {
+    pub target: f32,
+    pub current_temperature: Option<f32>,
+    pub sensor: usize,
     pub p: f32,
     pub i: f32,
     pub d: f32,
@@ -41,7 +44,9 @@ pub struct PidData {
     pub kd: f32,
     pub window_size: u32,
     pub max_val: f32,
+    pub osr: u32,
     pub enable: bool,
+    pub reset_i: bool,
     pub pid_val: f32,
     pub duty_cycle: u32,
 }
@@ -49,6 +54,9 @@ pub struct PidData {
 impl Default for PidData {
     fn default() -> Self {
         PidData {
+            target: 100.0,
+            current_temperature: None,
+            sensor: 0,
             p: 0.0,
             i: 0.0,
             d: 0.0,
@@ -56,14 +64,15 @@ impl Default for PidData {
             ki: 1.0,
             kd: 1.0,
             window_size: 500,
-            max_val: 100.0,
+            max_val: 0.0,
+            osr: 1,
             enable: false,
+            reset_i: false,
             pid_val: 0.0,
             duty_cycle: 0,
         }
     }
 }
-
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum State {

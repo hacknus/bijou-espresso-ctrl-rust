@@ -38,7 +38,9 @@ use stm32f4xx_hal::{
 };
 use tinybmp::Bmp;
 
-use crate::commands::{extract_command, send_housekeeping, Command};
+use crate::commands::{
+    extract_command, send_housekeeping, HeaterCommand, PumpCommand, ValveCommand,
+};
 use crate::devices::led::LED;
 use crate::devices::max31865::Wires;
 use crate::devices::max31865::MAX31865;
@@ -220,12 +222,13 @@ fn main() -> ! {
     let led_state_container =
         Arc::new(Mutex::new(led_state).expect("Failed to create data guard mutex"));
     let led_state_container_main = led_state_container.clone();
-    let led_state_container_led = led_state_container.clone();
+    let led_state_container_led = led_state_container;
 
     let state = State::Idle;
     let state_container = Arc::new(Mutex::new(state).expect("Failed to create data guard mutex"));
     let state_container_main = state_container.clone();
     let state_container_usb = state_container.clone();
+    let state_container_pid = state_container;
 
     let temperature_data = MeasuredData::default();
     let temperature_data_container =
@@ -234,34 +237,41 @@ fn main() -> ! {
     let temperature_data_container_adc = temperature_data_container.clone();
     let temperature_data_container_main = temperature_data_container.clone();
     let temperature_data_container_pid = temperature_data_container.clone();
-    let temperature_data_container_usb = temperature_data_container.clone();
+    let temperature_data_container_usb = temperature_data_container;
 
-    let out_data = PidData::default();
-    let out_data_container =
-        Arc::new(Mutex::new(out_data).expect("Failed to create data guard mutex"));
-    let out_data_container_display = out_data_container.clone();
-    let out_data_container_pid = out_data_container.clone();
-    let out_data_container_main = out_data_container.clone();
-    let out_data_container_usb = out_data_container.clone();
+    let pid_data = PidData::default();
+    let pid_data_container =
+        Arc::new(Mutex::new(pid_data).expect("Failed to create data guard mutex"));
+    let pid_data_container_display = pid_data_container.clone();
+    let pid_data_container_pid = pid_data_container.clone();
+    let pid_data_container_main = pid_data_container.clone();
+    let pid_data_container_usb = pid_data_container;
 
     let interface = Interface::default();
     let interface_data_container =
         Arc::new(Mutex::new(interface).expect("Failed to create data guard mutex"));
     let interface_data_container_display = interface_data_container.clone();
-    let interface_data_container_pid = interface_data_container.clone();
     let interface_data_container_main = interface_data_container.clone();
-    let interface_data_container_usb = interface_data_container.clone();
+    let interface_data_container_usb = interface_data_container;
 
     let pump = PumpData::default();
     let pump_data_container =
         Arc::new(Mutex::new(pump).expect("Failed to create data guard mutex"));
     let pump_data_container_display = pump_data_container.clone();
     let pump_data_container_main = pump_data_container.clone();
-    let pump_data_container_usb = pump_data_container.clone();
+    let pump_data_container_usb = pump_data_container;
 
-    let command_queue = Arc::new(Queue::new(10).unwrap());
-    let command_queue_main = command_queue.clone();
-    let command_queue_usb = command_queue.clone();
+    let pump_command_queue = Arc::new(Queue::new(10).unwrap());
+    let pump_command_queue_main = pump_command_queue.clone();
+    let pump_command_queue_usb = pump_command_queue;
+
+    let heater_command_queue = Arc::new(Queue::new(10).unwrap());
+    let heater_command_queue_pid = heater_command_queue.clone();
+    let heater_command_queue_usb = heater_command_queue;
+
+    let valve_command_queue = Arc::new(Queue::new(10).unwrap());
+    let valve_command_queue_main = valve_command_queue.clone();
+    let valve_command_queue_usb = valve_command_queue;
 
     delay.delay(1000.millis());
     usb_println("boot up ok");
@@ -341,66 +351,145 @@ fn main() -> ! {
     Task::new()
         .name("PID TASK")
         .stack_size(512)
-        .priority(TaskPriority(3))
+        .priority(TaskPriority(1))
         .start(move || {
             let mut pid = PID::new();
+            let mut current_temperature = None;
+            let mut state = State::Idle;
+
+            let mut boiler_override = None;
+
             loop {
                 if check_shutdown() {
+                    heater_2.set_low();
+                    fault_2_led.off();
                     break;
                 }
 
-                let mut current_temperature = None;
-                match temperature_data_container_pid.lock(Duration::ms(1)) {
-                    Ok(temperature_data) => {
-                        current_temperature = temperature_data.t5;
-                    }
-                    Err(_) => {}
+                // gather all containers
+                if let Ok(state_temp) = state_container_pid.lock(Duration::ms(1)) {
+                    state = state_temp.clone();
                 }
-                match interface_data_container_pid.lock(Duration::ms(1)) {
-                    Ok(interface) => {
-                        pid.target = interface.coffee_temperature;
+
+                if let Ok(cmd) = heater_command_queue_pid.receive(Duration::infinite()) {
+                    match cmd {
+                        HeaterCommand::CoffeeTemperature(temperature) => pid.target = temperature,
+                        HeaterCommand::SteamTemperature(_) => {}
+                        HeaterCommand::Heating(enable) => pid.enabled = enable,
+                        HeaterCommand::WindowSize(window_size) => {
+                            pid.window_size = window_size as u32;
+                        }
+                        HeaterCommand::PidP(kp) => pid.kp = kp,
+                        HeaterCommand::PidI(ki) => pid.ki = ki,
+                        HeaterCommand::PidD(kd) => pid.kd = kd,
+                        HeaterCommand::PidMaxVal(max_val) => pid.max_val = max_val,
+                        HeaterCommand::Boiler1(boiler_1) => boiler_override = boiler_1,
+                        HeaterCommand::Boiler2(_) => {}
                     }
-                    Err(_) => {}
                 }
-                match out_data_container_pid.lock(Duration::ms(1)) {
-                    Ok(mut out_data_temp) => {
-                        // get values
-                        pid.kp = out_data_temp.kp;
-                        pid.ki = out_data_temp.ki;
-                        pid.kd = out_data_temp.kd;
-                        pid.window_size = out_data_temp.window_size;
-                        pid.max_val = out_data_temp.max_val;
-                        // push values
-                        out_data_temp.p = pid.p;
-                        out_data_temp.i = pid.i;
-                        out_data_temp.d = pid.d;
-                        out_data_temp.pid_val = pid.val;
-                        out_data_temp.duty_cycle = pid.duty_cycle;
+
+                if let Ok(mut pid_temp) = pid_data_container_pid.lock(Duration::ms(10)) {
+                    // get values
+                    pid.enabled = pid_temp.enable;
+                    pid.kp = pid_temp.kp;
+                    pid.ki = pid_temp.ki;
+                    pid.kd = pid_temp.kd;
+                    pid.window_size = pid_temp.window_size;
+                    pid.max_val = pid_temp.max_val;
+                    pid.target = pid_temp.target;
+                    // update current temperature for state machine
+                    if let Ok(data) = temperature_data_container_pid.lock(Duration::ms(1)) {
+                        current_temperature = data.t1;
                     }
-                    Err(_) => {}
+                    pid_temp.current_temperature = current_temperature;
+                    // check if i has been reset
+                    if pid_temp.reset_i {
+                        pid.i = 0.0;
+                        pid_temp.reset_i = false;
+                    }
+                    // push values
+                    pid_temp.p = pid.p;
+                    pid_temp.i = pid.i;
+                    pid_temp.d = pid.d;
+                    pid_temp.pid_val = pid.val;
+                    pid_temp.duty_cycle = pid.duty_cycle;
+
+                    // state-machine
+                    match state {
+                        State::Idle => {
+                            if pid_temp.enable {
+                                state = State::CoffeeHeating;
+                            };
+                        }
+                        State::CoffeeHeating => {
+                            if !pid_temp.enable {
+                                state = State::Idle;
+                            }
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                if pid.target * 0.95 <= temperature
+                                    && temperature <= 1.05 * pid.target
+                                {
+                                    state = State::Ready;
+                                }
+                            }
+                        }
+                        State::Ready => {
+                            if !pid_temp.enable {
+                                state = State::Idle;
+                            }
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                if pid.target * 0.95 > temperature
+                                    || temperature > 1.05 * pid.target
+                                {
+                                    state = State::CoffeeHeating;
+                                }
+                            }
+                        }
+                        State::PreInfuse => {}
+                        State::Extracting => {}
+                        State::SteamHeating => {}
+                        State::Steaming => {}
+                    }
                 }
                 match current_temperature {
-                    None => {}
+                    None => {
+                        // if we have no temperature, we need to turn off the heater
+                        heater_2.set_low();
+                        fault_2_led.off();
+                        CurrentTask::delay(Duration::ms(pid.window_size));
+                    }
                     Some(t) => {
                         // we use a window and set the pin high for the calculated duty_cycle,
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
                         // since the heating process is slow, it is okay to have a larger window size
-                        let duty_cycle = pid.get_heat_value(t, tick_timer.now().ticks());
-                        let now = tick_timer.now().ticks();
-                        heater_1.set_high();
-                        while now + duty_cycle > tick_timer.now().ticks() {
-                            // heater switches at zero crossing, so we wait for one cycle 1/50Hz = 20ms
-                            freertos_rust::CurrentTask::delay(Duration::ms(20));
+                        let mut duty_cycle = pid.get_heat_value(t, tick_timer.now().ticks());
+                        if let Some(duty_cycle_override) = boiler_override {
+                            duty_cycle = duty_cycle_override;
                         }
-                        heater_1.set_low();
-                        while now + pid.window_size > tick_timer.now().ticks() {
-                            // heater switches at zero crossing, so we wait for one cycle 1/50Hz = 20ms
-                            freertos_rust::CurrentTask::delay(Duration::ms(20));
+                        if duty_cycle == 0 || !pid.enabled {
+                            heater_2.set_low();
+                            fault_2_led.off();
+                            CurrentTask::delay(Duration::ms(pid.window_size));
+                        } else if duty_cycle > 0 && duty_cycle < pid.window_size {
+                            heater_2.set_high();
+                            fault_2_led.on();
+                            CurrentTask::delay(Duration::ms(duty_cycle));
+                            heater_2.set_low();
+                            fault_2_led.off();
+                            CurrentTask::delay(Duration::ms(pid.window_size - duty_cycle));
+                        } else if duty_cycle >= pid.window_size {
+                            heater_2.set_high();
+                            fault_2_led.on();
+                            CurrentTask::delay(Duration::ms(pid.window_size));
                         }
                     }
                 }
-                freertos_rust::CurrentTask::delay(Duration::ms(1));
+
+                // send states
+                if let Ok(mut state_temp) = state_container_pid.lock(Duration::ms(1)) {
+                    *state_temp = state.clone();
+                }
             }
         })
         .unwrap();
@@ -573,7 +662,7 @@ fn main() -> ! {
         .priority(TaskPriority(3))
         .start(move || {
             let mut temperature_data = MeasuredData::default();
-            let mut out_data = PidData::default();
+            let mut pid_data = PidData::default();
             let mut interface = Interface::default();
             let mut pump = PumpData::default();
             let mut hk_rate = 500.0;
@@ -594,9 +683,9 @@ fn main() -> ! {
                     }
                     Err(_) => {}
                 }
-                match out_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(out_data_temp) => {
-                        out_data = out_data_temp.clone();
+                match pid_data_container_usb.lock(Duration::ms(1)) {
+                    Ok(pid_data_temp) => {
+                        pid_data = pid_data_temp.clone();
                     }
                     Err(_) => {}
                 }
@@ -619,21 +708,28 @@ fn main() -> ! {
                     Err(_) => {}
                 }
 
-                send_housekeeping(&state, &temperature_data, &interface, &out_data, "");
+                send_housekeeping(&state, &temperature_data, &interface, &pid_data, &pump, "");
 
                 let mut message_bytes = [0; 1024];
                 usb_read(&mut message_bytes);
                 match core::str::from_utf8(&message_bytes) {
                     Ok(cmd) => {
-                        extract_command(cmd, &command_queue_usb, &mut hk, &mut hk_rate);
+                        extract_command(
+                            cmd,
+                            &heater_command_queue_usb,
+                            &pump_command_queue_usb,
+                            &valve_command_queue_usb,
+                            &mut hk,
+                            &mut hk_rate,
+                        );
                     }
                     Err(_) => {}
                 }
 
                 // sample frequency
-                freertos_rust::CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
+                CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
                 stat_led.toggle();
-                freertos_rust::CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
+                CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
                 stat_led.toggle();
             }
         })
@@ -645,10 +741,10 @@ fn main() -> ! {
         .priority(TaskPriority(2))
         .start(move || {
             let mut temperature_data = MeasuredData::default();
-            let mut out_data = PidData::default();
+            let mut pid_data = PidData::default();
             let mut pump = PumpData::default();
             let mut interface = Interface::default();
-            let mut led_state = LedState::Off;
+            let mut led_state;
             let mut state = State::Idle;
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
@@ -667,9 +763,9 @@ fn main() -> ! {
                     }
                     Err(_) => {}
                 }
-                match out_data_container_main.lock(Duration::ms(1)) {
-                    Ok(out_data_temp) => {
-                        out_data = out_data_temp.clone();
+                match pid_data_container_main.lock(Duration::ms(1)) {
+                    Ok(pid_data_temp) => {
+                        pid_data = pid_data_temp.clone();
                     }
                     Err(_) => {}
                 }
@@ -692,130 +788,74 @@ fn main() -> ! {
                     Err(_) => {}
                 }
 
-                let cmd = command_queue_main.receive(Duration::infinite()).unwrap();
-                match cmd {
-                    Command::TriggerExtraction(time) => {
-                        extraction_time = (time * main_task_period as f32) as u32;
-                        state = State::Extracting;
-                    }
-                    Command::CoffeeTemperature(temperature) => {
-                        match interface_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut interface_temp) => {
-                                interface_temp.coffee_temperature = temperature;
+                if let Ok(cmd) = valve_command_queue_main.receive(Duration::infinite()) {
+                    match cmd {
+                        ValveCommand::Valve1(state) => {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
                             }
-                            Err(_) => {}
                         }
-                    }
-                    Command::SteamTemperature(temperature) => {
-                        match interface_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut interface_temp) => {
-                                interface_temp.steam_temperature = temperature;
+                        ValveCommand::Valve2(state) => {
+                            if state {
+                                valve2_pin.set_high()
+                            } else {
+                                valve2_pin.set_low()
                             }
-                            Err(_) => {}
                         }
                     }
-                    Command::Pump(state) => match pump_data_container_main.lock(Duration::ms(1)) {
-                        Ok(mut pump_temp) => {
-                            pump_temp.enable = state;
-                        }
-                        Err(_) => {}
-                    },
-                    Command::PumpPower(pwr) => {
-                        match pump_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pump_temp) => {
-                                pump_temp.extract_power = pwr as f32;
+                }
+
+                if let Ok(cmd) = pump_command_queue_main.receive(Duration::infinite()) {
+                    match cmd {
+                        PumpCommand::Pump(state) => {
+                            match pump_data_container_main.lock(Duration::ms(1)) {
+                                Ok(mut pump_temp) => {
+                                    pump_temp.enable = state;
+                                }
+                                Err(_) => {}
                             }
-                            Err(_) => {}
                         }
-                    }
-                    Command::PumpHeatUpPower(pwr) => {
-                        match pump_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pump_temp) => {
-                                pump_temp.heat_up_power = pwr as f32;
+                        PumpCommand::PumpPower(pwr) => {
+                            match pump_data_container_main.lock(Duration::ms(1)) {
+                                Ok(mut pump_temp) => {
+                                    pump_temp.extract_power = pwr as f32;
+                                }
+                                Err(_) => {}
                             }
-                            Err(_) => {}
                         }
-                    }
-                    Command::PumpPreInfusePower(pwr) => {
-                        match pump_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pump_temp) => {
-                                pump_temp.pre_infuse_power = pwr as f32;
+                        PumpCommand::PumpHeatUpPower(pwr) => {
+                            match pump_data_container_main.lock(Duration::ms(1)) {
+                                Ok(mut pump_temp) => {
+                                    pump_temp.heat_up_power = pwr as f32;
+                                }
+                                Err(_) => {}
                             }
-                            Err(_) => {}
                         }
-                    }
-                    Command::PumpCoffeePower(pwr) => {
-                        match pump_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pump_temp) => {
-                                pump_temp.extract_power = pwr as f32;
+                        PumpCommand::PumpPreInfusePower(pwr) => {
+                            match pump_data_container_main.lock(Duration::ms(1)) {
+                                Ok(mut pump_temp) => {
+                                    pump_temp.pre_infuse_power = pwr as f32;
+                                }
+                                Err(_) => {}
                             }
-                            Err(_) => {}
                         }
-                    }
-                    Command::PumpSteamPower(pwr) => {
-                        match pump_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pump_temp) => {
-                                pump_temp.steam_power = pwr as f32;
+                        PumpCommand::PumpCoffeePower(pwr) => {
+                            match pump_data_container_main.lock(Duration::ms(1)) {
+                                Ok(mut pump_temp) => {
+                                    pump_temp.extract_power = pwr as f32;
+                                }
+                                Err(_) => {}
                             }
-                            Err(_) => {}
                         }
-                    }
-                    Command::Valve1(state) => {
-                        if state {
-                            valve1_pin.set_high()
-                        } else {
-                            valve1_pin.set_low()
-                        }
-                    }
-                    Command::Valve2(state) => {
-                        if state {
-                            valve2_pin.set_high()
-                        } else {
-                            valve2_pin.set_low()
-                        }
-                    }
-                    Command::Heating(state) => {
-                        match out_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pid_data) => {
-                                pid_data.enable = state;
+                        PumpCommand::PumpSteamPower(pwr) => {
+                            match pump_data_container_main.lock(Duration::ms(1)) {
+                                Ok(mut pump_temp) => {
+                                    pump_temp.steam_power = pwr as f32;
+                                }
+                                Err(_) => {}
                             }
-                            Err(_) => {}
-                        }
-                    }
-                    Command::Boiler1(_pwr) => {}
-                    Command::Boiler2(_pwr) => {}
-                    Command::WindowSize(window_size) => {
-                        match out_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pid_data) => {
-                                pid_data.window_size = window_size as u32;
-                            }
-                            Err(_) => {}
-                        }
-                    }
-                    Command::PidP(p) => match out_data_container_main.lock(Duration::ms(1)) {
-                        Ok(mut pid_data) => {
-                            pid_data.kp = p;
-                        }
-                        Err(_) => {}
-                    },
-                    Command::PidI(i) => match out_data_container_main.lock(Duration::ms(1)) {
-                        Ok(mut pid_data) => {
-                            pid_data.ki = i;
-                        }
-                        Err(_) => {}
-                    },
-                    Command::PidD(d) => match out_data_container_main.lock(Duration::ms(1)) {
-                        Ok(mut pid_data) => {
-                            pid_data.kd = d;
-                        }
-                        Err(_) => {}
-                    },
-                    Command::PidMaxVal(max_val) => {
-                        match out_data_container_main.lock(Duration::ms(1)) {
-                            Ok(mut pid_data) => {
-                                pid_data.max_val = max_val;
-                            }
-                            Err(_) => {}
                         }
                     }
                 }
@@ -828,7 +868,7 @@ fn main() -> ! {
                         valve1_pin.set_low();
                         valve2_pin.set_low();
                         led_state = LedState::Off;
-                        out_data.enable = false;
+                        pid_data.enable = false;
                         if interface.button && !water_low {
                             // TODO: check button pin
                             state = State::CoffeeHeating;
@@ -838,7 +878,7 @@ fn main() -> ! {
                     State::CoffeeHeating => {
                         bldc_pwm.set_duty(max_duty * (pump.heat_up_power / 100.0) as u16);
                         bldc_en.set_low();
-                        out_data.enable = true;
+                        pid_data.enable = true;
                         led_state = LedState::SlowSine;
                         valve1_pin.set_high();
                         if let Some(temperature) = temperature_data.t1 {
@@ -935,14 +975,8 @@ fn main() -> ! {
                     }
                     Err(_) => {}
                 }
-                match out_data_container_main.lock(Duration::ms(1)) {
-                    Ok(mut out_data_temp) => {
-                        out_data_temp.enable = out_data.enable;
-                    }
-                    Err(_) => {}
-                }
 
-                freertos_rust::CurrentTask::delay(Duration::ms(main_task_period));
+                CurrentTask::delay(Duration::ms(main_task_period));
             }
         })
         .unwrap();

@@ -4,29 +4,36 @@ use arrform::{arrform, ArrForm};
 use freertos_rust::{Duration, Queue};
 
 use crate::usb_println;
-use crate::utils::{Interface, MeasuredData, PidData, State};
+use crate::utils::{Interface, MeasuredData, PidData, PumpData, State};
 
 #[derive(Copy, Clone, Debug)]
-pub enum Command {
-    TriggerExtraction(f32),
-    CoffeeTemperature(f32),
-    SteamTemperature(f32),
+pub enum PumpCommand {
     Pump(bool),
     PumpPower(i16),
     PumpHeatUpPower(i16),
     PumpPreInfusePower(i16),
     PumpCoffeePower(i16),
     PumpSteamPower(i16),
-    Valve1(bool),
-    Valve2(bool),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum HeaterCommand {
+    CoffeeTemperature(f32),
+    SteamTemperature(f32),
     Heating(bool),
-    Boiler1(i16),
-    Boiler2(i16),
     WindowSize(f32),
     PidP(f32),
     PidI(f32),
     PidD(f32),
     PidMaxVal(f32),
+    Boiler1(Option<u32>),
+    Boiler2(Option<u32>),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ValveCommand {
+    Valve1(bool),
+    Valve2(bool),
 }
 
 const CMD_QUEUE_TIMEOUT: u32 = 5;
@@ -51,7 +58,9 @@ fn extract_value(cmd: &str) -> Option<f32> {
 
 pub fn extract_command(
     cmd: &str,
-    command_queue: &Arc<Queue<Command>>,
+    heater_command_queue: &Arc<Queue<HeaterCommand>>,
+    pump_command_queue: &Arc<Queue<PumpCommand>>,
+    valve_command_queue: &Arc<Queue<ValveCommand>>,
     hk: &mut bool,
     hk_period: &mut f32,
 ) {
@@ -65,9 +74,9 @@ pub fn extract_command(
                     usb_println(
                         arrform!(64, "[ACK] cmd OK, set coffee temperature = {}", val).as_str(),
                     );
-                    command_queue
+                    heater_command_queue
                         .send(
-                            Command::CoffeeTemperature(val),
+                            HeaterCommand::CoffeeTemperature(val),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -82,9 +91,9 @@ pub fn extract_command(
                     usb_println(
                         arrform!(64, "[ACK] cmd OK, set steam temperature = {}", val).as_str(),
                     );
-                    command_queue
+                    heater_command_queue
                         .send(
-                            Command::SteamTemperature(val),
+                            HeaterCommand::SteamTemperature(val),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -102,14 +111,9 @@ pub fn extract_command(
                             "[ACK] cmd OK, triggering extraction for = {} seconds",
                             val
                         )
-                            .as_str(),
+                        .as_str(),
                     );
-                    command_queue
-                        .send(
-                            Command::TriggerExtraction(val),
-                            Duration::ms(CMD_QUEUE_TIMEOUT),
-                        )
-                        .unwrap();
+                    // TODO: trigger pump
                 }
             }
         } else if cmd.contains("[CMD] setP=") {
@@ -119,8 +123,8 @@ pub fn extract_command(
                 }
                 Some(val) => {
                     usb_println(arrform!(64, "[ACK] cmd OK, set p value = {}", val).as_str());
-                    command_queue
-                        .send(Command::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                    heater_command_queue
+                        .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                 }
             }
@@ -131,8 +135,8 @@ pub fn extract_command(
                 }
                 Some(val) => {
                     usb_println(arrform!(64, "[ACK] cmd OK, set i value = {}", val).as_str());
-                    command_queue
-                        .send(Command::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                    heater_command_queue
+                        .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                 }
             }
@@ -143,8 +147,8 @@ pub fn extract_command(
                 }
                 Some(val) => {
                     usb_println(arrform!(64, "[ACK] cmd OK, set d value = {}", val).as_str());
-                    command_queue
-                        .send(Command::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                    heater_command_queue
+                        .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                 }
             }
@@ -157,8 +161,11 @@ pub fn extract_command(
                     usb_println(
                         arrform!(64, "[ACK] cmd OK, set window size = {} ms", val).as_str(),
                     );
-                    command_queue
-                        .send(Command::WindowSize(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                    heater_command_queue
+                        .send(
+                            HeaterCommand::WindowSize(val),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
                         .unwrap();
                 }
             }
@@ -169,8 +176,11 @@ pub fn extract_command(
                 }
                 Some(val) => {
                     usb_println(arrform!(64, "[ACK] cmd OK, set PID max value = {}", val).as_str());
-                    command_queue
-                        .send(Command::PidMaxVal(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                    heater_command_queue
+                        .send(
+                            HeaterCommand::PidMaxVal(val),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
                         .unwrap();
                 }
             }
@@ -183,9 +193,9 @@ pub fn extract_command(
                     usb_println(
                         arrform!(64, "[ACK] cmd OK, set pump coffee power = {}", val).as_str(),
                     );
-                    command_queue
+                    pump_command_queue
                         .send(
-                            Command::PumpCoffeePower(val as i16),
+                            PumpCommand::PumpCoffeePower(val as i16),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -200,9 +210,9 @@ pub fn extract_command(
                     usb_println(
                         arrform!(64, "[ACK] cmd OK, set pump steam power = {}", val).as_str(),
                     );
-                    command_queue
+                    pump_command_queue
                         .send(
-                            Command::PumpSteamPower(val as i16),
+                            PumpCommand::PumpSteamPower(val as i16),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -217,9 +227,9 @@ pub fn extract_command(
                     usb_println(
                         arrform!(64, "[ACK] cmd OK, set pump pre-infuse power = {}", val).as_str(),
                     );
-                    command_queue
+                    pump_command_queue
                         .send(
-                            Command::PumpPreInfusePower(val as i16),
+                            PumpCommand::PumpPreInfusePower(val as i16),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -235,60 +245,69 @@ pub fn extract_command(
                         arrform!(64, "[ACK] cmd OK, set pump heat up cycling power = {}", val)
                             .as_str(),
                     );
-                    command_queue
+                    pump_command_queue
                         .send(
-                            Command::PumpHeatUpPower(val as i16),
+                            PumpCommand::PumpHeatUpPower(val as i16),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] openValve1") {
-            command_queue
-                .send(Command::Valve1(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+            valve_command_queue
+                .send(ValveCommand::Valve1(true), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] closeValve1") {
-            command_queue
-                .send(Command::Valve1(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+            valve_command_queue
+                .send(ValveCommand::Valve1(false), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] openValve2") {
-            command_queue
-                .send(Command::Valve2(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+            valve_command_queue
+                .send(ValveCommand::Valve2(true), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] closeValve2") {
-            command_queue
-                .send(Command::Valve2(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+            valve_command_queue
+                .send(ValveCommand::Valve2(false), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] startHeating") {
-            command_queue
-                .send(Command::Heating(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+            heater_command_queue
+                .send(
+                    HeaterCommand::Heating(true),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] stopHeating") {
-            command_queue
-                .send(Command::Heating(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+            heater_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] startPump") {
-            command_queue
-                .send(Command::Pump(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+            pump_command_queue
+                .send(PumpCommand::Pump(true), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] stopPump") {
-            command_queue
-                .send(Command::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+            pump_command_queue
+                .send(PumpCommand::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] stopAll") {
-            command_queue
-                .send(Command::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+            pump_command_queue
+                .send(PumpCommand::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
-            command_queue
-                .send(Command::Heating(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+            heater_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] disableHK") {
@@ -338,20 +357,20 @@ pub fn send_housekeeping(
     temperatures: &MeasuredData,
     interface: &Interface,
     output: &PidData,
+    pump: &PumpData,
     msg: &str,
 ) {
     let hk = arrform!(
         128,
-        "[HK] {:?}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}",
+        "[SYS] {:?}, {}, {}, {}, {}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}",
         state,
         interface.lever_switch,
         interface.steam_open,
         interface.water_low,
-        temperatures.t1.unwrap_or(0.0),
-        temperatures.t2.unwrap_or(0.0),
-        temperatures.t3.unwrap_or(0.0),
-        temperatures.t4.unwrap_or(0.0),
-        temperatures.t5.unwrap_or(0.0),
+        pump.heat_up_power,
+        pump.pre_infuse_power,
+        pump.steam_power,
+        pump.extract_power,
         // TODO: pressure value!
         interface.coffee_temperature,
         output.p,
@@ -360,6 +379,16 @@ pub fn send_housekeeping(
         output.pid_val,
         output.duty_cycle,
         msg
+    );
+    usb_println(hk.as_str());
+    let hk = arrform!(
+        128,
+        "[T] {:.2}, {:.2}, {:.2}, {:.2}, {:.2}",
+        temperatures.t1.unwrap_or(0.0),
+        temperatures.t2.unwrap_or(0.0),
+        temperatures.t3.unwrap_or(0.0),
+        temperatures.t4.unwrap_or(0.0),
+        temperatures.t5.unwrap_or(0.0),
     );
     usb_println(hk.as_str());
 }

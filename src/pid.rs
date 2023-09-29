@@ -1,4 +1,5 @@
 pub struct PID {
+    pub enabled: bool,
     pub p: f32,
     pub i: f32,
     pub d: f32,
@@ -14,9 +15,11 @@ pub struct PID {
     pub max_val: f32,
 }
 
+#[allow(dead_code)]
 impl PID {
     pub fn new() -> Self {
         PID {
+            enabled: false,
             p: 0.0,
             i: 0.0,
             d: 0.0,
@@ -45,13 +48,8 @@ impl PID {
     }
 
     pub fn get_heat_value(&mut self, temperature: f32, now: u32) -> u32 {
-        let mut pid_val = self.calculate(temperature, now);
-        if pid_val < 0.0 {
-            pid_val = 0.0;
-        } else if pid_val > self.max_val {
-            pid_val = self.max_val;
-        }
-        self.duty_cycle = (pid_val / self.max_val * self.window_size as f32) as u32;
+        let pid_val = self.calculate(temperature, now);
+        self.duty_cycle = (pid_val * self.window_size as f32) as u32;
         self.duty_cycle
     }
 }
