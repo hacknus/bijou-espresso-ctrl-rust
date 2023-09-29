@@ -88,7 +88,7 @@ where
     }
 
     pub fn get_resistance(&mut self) -> Option<f32> {
-        const MAX31865_RREF: u16 = 4000; // Reference resistor
+        const MAX31865_RREF: u16 = 400; // Reference resistor
         const MAX31865_FACTOR: u16 = 32768; // 2^15 used for data to resistance conversion
         if let Ok(raw_resistance) = self.get_raw() {
             Some((raw_resistance as f32 * MAX31865_RREF as f32) / MAX31865_FACTOR as f32)
@@ -98,38 +98,11 @@ where
         }
     }
 
-    // Deprecated, old
-    //
-    // pub fn get_temperature(&mut self, spi: &mut Spi<SPI1, (PA5, PA6, PA7)>) -> Option<f32> {
-    //     const MAX31865_ALPHA: f32 = 0.03851; // PT-1000 temperature coefficient
-    //     if let Some(resistance) = self.get_resistance(spi) {
-    //         Some(((resistance / 100.0) - 1.0) / MAX31865_ALPHA + 273.15)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // source of this approximation: http://www.mosaic-industries.com/embedded-systems/microcontroller-projects/temperature-measurement/platinum-rtd-sensors/resistance-calibration-table
-    // attention: might not be accurate below -200 °C
     pub fn get_temperature(&mut self) -> Option<f32> {
-        const C0: f32 = -245.19;
-        const C1: f32 = 2.5293;
-        const C2: f32 = -0.066046;
-        const C3: f32 = 4.0422E-3;
-        const C4: f32 = -2.0697E-6;
-        const C5: f32 = -0.025422;
-        const C6: f32 = 1.6883E-3;
-        const C7: f32 = -1.3601E-6;
-        if let Some(r) = self.get_resistance() {
-            let temperature = C0
-                + (r / 10.0 * (C1 + r / 10.0 * (C2 + r / 10.0 * (C3 + C4 * r / 10.0))))
-                    / (1.0 + r / 10.0 * (C5 + r / 10.0 * (C6 + C7 * r / 10.0)));
-            Some(temperature + 273.15)
-        } else {
-            None
-        }
+        const MAX31865_ALPHA: f32 = 0.003851; // PT-100 temperature coefficient
+        self.get_resistance()
+            .map(|resistance| ((resistance / 100.0) - 1.0) / MAX31865_ALPHA)
     }
-
     fn read(&mut self, register: u8, buffer: &mut [u8]) -> Result<(), MAX31865Error<E>> {
         buffer[0] = register;
         //usb_println(arrform!(64,"read cmd buffer {:?}", buffer).as_str());
