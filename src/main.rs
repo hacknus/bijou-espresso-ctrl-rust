@@ -8,78 +8,60 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
+use core::f32::consts::PI;
+use core::panic::PanicInfo;
+
+use arrform::{arrform, ArrForm};
 use cortex_m::asm;
 use cortex_m_rt::exception;
 use cortex_m_rt::{entry, ExceptionFrame};
-use panic_halt as _;
-use arrform::{arrform, ArrForm};
-use stm32f4xx_hal::otg_fs::{USB};
-use stm32f4xx_hal::{
-    pac::{self, Interrupt},
-    gpio::{self, Edge, Input},
-    prelude::*,
-};
-
-use freertos_rust::*;
-use core::alloc::Layout;
-use core::f32::consts::PI;
-
-use crate::led::LED;
-use crate::usb::{usb_init, usb_print, usb_println, usb_read};
-use crate::max31865::MAX31865;
-use crate::pid::PID;
-use micromath::F32Ext;
-
 use embedded_graphics::{
+    image::Image,
+    mono_font::{ascii::FONT_6X10, MonoTextStyle},
     pixelcolor::BinaryColor,
+    pixelcolor::Rgb565,
     prelude::*,
-    primitives::{
-        Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, StrokeAlignment, Triangle,
-    },
-    text::{Alignment, Text},
-    mock_display::MockDisplay,
-    mono_font::{
-        ascii::{FONT_10X20, FONT_6X10, FONT_6X12, FONT_9X15},
-        MonoTextStyle, MonoTextStyleBuilder,
-    },
-    mono_font::iso_8859_5::{FONT_5X8},
+    text::Text,
 };
-
+use freertos_rust::*;
+use micromath::F32Ext;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use stm32f4xx_hal::{
-    pac::I2C1,
-    i2c::{Mode as i2cMode, I2c},
-    gpio::{PB6, PB7},
+    gpio::Edge,
+    i2c::Mode as i2cMode,
+    otg_fs::USB,
+    pac::Peripherals,
+    pac::{self, Interrupt},
     prelude::*,
-};
-use stm32f4xx_hal::{
-    pac::SPI2,
-    spi::{Spi, Phase, Polarity, Mode as spiMode},
-    gpio::{Output, PB13, PB14, PB15, Pin},
-    prelude::*,
+    spi::{Mode as spiMode, Phase, Polarity},
+    timer::{Channel, Channel3, Channel4},
 };
 use tinybmp::Bmp;
-use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
-use stm32f4xx_hal::timer::Channel;
+
+use crate::commands::{extract_command, send_housekeeping, Command};
+use crate::devices::led::LED;
+use crate::devices::max31865::Wires;
+use crate::devices::max31865::MAX31865;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
-use crate::utils::{Interface, PidData, MeasuredData, State, PumpData, LedState};
+use crate::pid::PID;
+use crate::usb::{usb_init, usb_println, usb_read};
+use crate::utils::{Interface, LedState, MeasuredData, PidData, PumpData, State};
 
-
-use devices::led;
-use devices::max31865;
-use crate::commands::{extract_command, send_housekeeping};
-
-mod usb;
 mod commands;
+mod devices;
 mod intrpt;
 mod pid;
+mod usb;
 mod utils;
-mod devices;
 
+static mut SHUTDOWN: bool = false;
 
 #[global_allocator]
 static GLOBAL: FreeRtosAllocator = FreeRtosAllocator;
 
+fn check_shutdown() -> bool {
+    cortex_m::interrupt::free(|_| unsafe { SHUTDOWN })
+}
 
 #[entry]
 fn main() -> ! {
@@ -101,7 +83,7 @@ fn main() -> ! {
     tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
 
     let mut delay = dp.TIM1.delay_us(&clocks);
-    delay.delay(100.millis());  // apparently required for USB to set up properly...
+    delay.delay(100.millis()); // apparently required for USB to set up properly...
 
     // initialize ports
     let gpioa = dp.GPIOA.split();
@@ -119,12 +101,12 @@ fn main() -> ! {
     let mut bldc_en = gpioa.pa8.into_push_pull_output();
     let mut bldc_dir = gpioc.pc9.into_push_pull_output();
     bldc_dir.set_low();
-    let water_low = false;  // TODO: implement water_low pin
-    let buzz = gpioa.pa3.into_alternate();
-    let led_dim = gpiob.pb1.into_alternate();
+    let water_low = false; // TODO: implement water_low pin
     let mut heater_1 = gpioc.pc6.into_push_pull_output();
     let mut heater_2 = gpioc.pc7.into_push_pull_output();
-    let bldc_v = gpioc.pc8.into_alternate();
+    let bldc_v = Channel3::new(gpioc.pc8);
+    let buzz = Channel4::new(gpioa.pa3);
+    let led_dim = Channel4::new(gpiob.pb1);
 
     let enc_pin_a = gpioe.pe11.into_floating_input();
     let mut enc_pin_b = gpioe.pe9.into_floating_input();
@@ -134,7 +116,6 @@ fn main() -> ! {
     enc_pin_b.trigger_on_edge(&mut dp.EXTI, Edge::RisingFalling);
     enc_pin_b.enable_interrupt(&mut dp.EXTI);
 
-
     // initialize leds
     let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
     let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
@@ -143,13 +124,22 @@ fn main() -> ! {
     // initialize switch
     let sw = gpiob.pb0.into_floating_input();
 
+    // initialize extension pins
+    let mut valve1_pin = gpioa.pa15.into_push_pull_output();
+    let mut valve2_pin = gpioc.pc10.into_push_pull_output();
+    let mut _pin_c_11 = gpioc.pc11.into_push_pull_output();
+    let mut _pin_c_12 = gpioc.pc12.into_push_pull_output();
+
     // initialize buzzer
     let mut buzz_pwm = dp.TIM2.pwm_hz(buzz, 2000.Hz(), &clocks);
     let max_duty = buzz_pwm.get_max_duty();
     buzz_pwm.set_duty(Channel::C4, max_duty / 2);
 
     // initialize pwm timer 3
-    let (mut bldc_pwm, mut led_pwm) = dp.TIM3.pwm_hz((bldc_v, led_dim), 10000.Hz(), &clocks).split();
+    let (mut bldc_pwm, mut led_pwm) = dp
+        .TIM3
+        .pwm_hz((bldc_v, led_dim), 10000.Hz(), &clocks)
+        .split();
 
     // initialize dimming LED
     let max_duty = led_pwm.get_max_duty();
@@ -164,8 +154,8 @@ fn main() -> ! {
         usb_global: dp.OTG_FS_GLOBAL,
         usb_device: dp.OTG_FS_DEVICE,
         usb_pwrclk: dp.OTG_FS_PWRCLK,
-        pin_dm: gpioa.pa11.into_alternate(),
-        pin_dp: gpioa.pa12.into_alternate(),
+        pin_dm: stm32f4xx_hal::gpio::alt::otg_fs::Dm::PA11(gpioa.pa11.into_alternate()),
+        pin_dp: stm32f4xx_hal::gpio::alt::otg_fs::Dp::PA12(gpioa.pa12.into_alternate()),
         hclk: clocks.hclk(),
     };
 
@@ -192,7 +182,7 @@ fn main() -> ! {
     let scl = gpiob.pb6;
     let sda = gpiob.pb7;
     // initialize i2c
-    let i2c: I2c<I2C1, (PB6, PB7)> = dp.I2C1.i2c(
+    let i2c = dp.I2C1.i2c(
         (scl, sda),
         i2cMode::Standard {
             frequency: 100.kHz(),
@@ -201,7 +191,8 @@ fn main() -> ! {
     );
 
     let interface = I2CDisplayInterface::new(i2c);
-    let bmp = Bmp::from_slice(include_bytes!("../images/rust.bmp")).expect("Failed to load BMP image");
+    let bmp =
+        Bmp::from_slice(include_bytes!("../images/rust.bmp")).expect("Failed to load BMP image");
     // let bmp_inv = Bmp::from_slice(include_bytes!("../images/rust1.bmp")).expect("Failed to load BMP image");
 
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
@@ -213,7 +204,7 @@ fn main() -> ! {
     let sdi = gpiob.pb15;
 
     // initialize spi
-    let mut spi: Spi<SPI2, (PB13, PB14, PB15)> = dp.SPI2.spi(
+    let spi = dp.SPI2.spi(
         (sclk, sdo, sdi),
         spiMode {
             polarity: Polarity::IdleHigh,
@@ -223,8 +214,11 @@ fn main() -> ! {
         &clocks,
     );
 
+    let spi_bus = shared_bus::BusManagerSimple::new(spi);
+
     let led_state = LedState::Off;
-    let led_state_container = Arc::new(Mutex::new(led_state).expect("Failed to create data guard mutex"));
+    let led_state_container =
+        Arc::new(Mutex::new(led_state).expect("Failed to create data guard mutex"));
     let led_state_container_main = led_state_container.clone();
     let led_state_container_led = led_state_container.clone();
 
@@ -234,7 +228,8 @@ fn main() -> ! {
     let state_container_usb = state_container.clone();
 
     let temperature_data = MeasuredData::default();
-    let temperature_data_container = Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
+    let temperature_data_container =
+        Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
     let temperature_data_container_display = temperature_data_container.clone();
     let temperature_data_container_adc = temperature_data_container.clone();
     let temperature_data_container_main = temperature_data_container.clone();
@@ -242,24 +237,31 @@ fn main() -> ! {
     let temperature_data_container_usb = temperature_data_container.clone();
 
     let out_data = PidData::default();
-    let out_data_container = Arc::new(Mutex::new(out_data).expect("Failed to create data guard mutex"));
+    let out_data_container =
+        Arc::new(Mutex::new(out_data).expect("Failed to create data guard mutex"));
     let out_data_container_display = out_data_container.clone();
     let out_data_container_pid = out_data_container.clone();
     let out_data_container_main = out_data_container.clone();
     let out_data_container_usb = out_data_container.clone();
 
     let interface = Interface::default();
-    let interface_data_container = Arc::new(Mutex::new(interface).expect("Failed to create data guard mutex"));
+    let interface_data_container =
+        Arc::new(Mutex::new(interface).expect("Failed to create data guard mutex"));
     let interface_data_container_display = interface_data_container.clone();
     let interface_data_container_pid = interface_data_container.clone();
     let interface_data_container_main = interface_data_container.clone();
     let interface_data_container_usb = interface_data_container.clone();
 
     let pump = PumpData::default();
-    let pump_data_container = Arc::new(Mutex::new(pump).expect("Failed to create data guard mutex"));
+    let pump_data_container =
+        Arc::new(Mutex::new(pump).expect("Failed to create data guard mutex"));
     let pump_data_container_display = pump_data_container.clone();
     let pump_data_container_main = pump_data_container.clone();
     let pump_data_container_usb = pump_data_container.clone();
+
+    let command_queue = Arc::new(Queue::new(10).unwrap());
+    let command_queue_main = command_queue.clone();
+    let command_queue_usb = command_queue.clone();
 
     delay.delay(1000.millis());
     usb_println("boot up ok");
@@ -272,19 +274,23 @@ fn main() -> ! {
         .stack_size(1024)
         .priority(TaskPriority(4))
         .start(move || {
-            let mut max31865_1 = MAX31865::new(cs_1, 0.0, 2);
-            let mut max31865_2 = MAX31865::new(cs_2, 0.0, 2);
-            let mut max31865_3 = MAX31865::new(cs_3, 0.0, 2);
-            let mut max31865_4 = MAX31865::new(cs_4, 0.0, 2);
-            let mut max31865_5 = MAX31865::new(cs_5, 0.0, 2);
+            let mut max31865_1 = MAX31865::new(spi_bus.acquire_spi(), cs_1, Wires::TwoWire);
+            let mut max31865_2 = MAX31865::new(spi_bus.acquire_spi(), cs_2, Wires::TwoWire);
+            let mut max31865_3 = MAX31865::new(spi_bus.acquire_spi(), cs_3, Wires::TwoWire);
+            let mut max31865_4 = MAX31865::new(spi_bus.acquire_spi(), cs_4, Wires::TwoWire);
+            let mut max31865_5 = MAX31865::new(spi_bus.acquire_spi(), cs_5, Wires::TwoWire);
 
-            let max31865_1_state = max31865_1.init(&mut spi);
-            let max31865_2_state = max31865_2.init(&mut spi);
-            let max31865_3_state = max31865_3.init(&mut spi);
-            let max31865_4_state = max31865_4.init(&mut spi);
-            let max31865_5_state = max31865_5.init(&mut spi);
+            let max31865_1_state = max31865_1.init();
+            let max31865_2_state = max31865_2.init();
+            let max31865_3_state = max31865_3.init();
+            let max31865_4_state = max31865_4.init();
+            let max31865_5_state = max31865_5.init();
 
             loop {
+                if check_shutdown() {
+                    break;
+                }
+
                 let t1;
                 let t2;
                 let t3;
@@ -292,27 +298,27 @@ fn main() -> ! {
                 let t5;
 
                 if max31865_1_state.is_ok() {
-                    t1 = max31865_1.get_temperature(&mut spi);
+                    t1 = max31865_1.get_temperature();
                 } else {
                     t1 = None;
                 }
                 if max31865_2_state.is_ok() {
-                    t2 = max31865_2.get_temperature(&mut spi);
+                    t2 = max31865_2.get_temperature();
                 } else {
                     t2 = None;
                 }
                 if max31865_3_state.is_ok() {
-                    t3 = max31865_3.get_temperature(&mut spi);
+                    t3 = max31865_3.get_temperature();
                 } else {
                     t3 = None;
                 }
                 if max31865_4_state.is_ok() {
-                    t4 = max31865_4.get_temperature(&mut spi);
+                    t4 = max31865_4.get_temperature();
                 } else {
                     t4 = None;
                 }
                 if max31865_5_state.is_ok() {
-                    t5 = max31865_5.get_temperature(&mut spi);
+                    t5 = max31865_5.get_temperature();
                 } else {
                     t5 = None;
                 }
@@ -329,7 +335,8 @@ fn main() -> ! {
                 }
                 freertos_rust::CurrentTask::delay(Duration::ms(100));
             }
-        }).unwrap();
+        })
+        .unwrap();
 
     Task::new()
         .name("PID TASK")
@@ -338,6 +345,10 @@ fn main() -> ! {
         .start(move || {
             let mut pid = PID::new();
             loop {
+                if check_shutdown() {
+                    break;
+                }
+
                 let mut current_temperature = None;
                 match temperature_data_container_pid.lock(Duration::ms(1)) {
                     Ok(temperature_data) => {
@@ -391,14 +402,14 @@ fn main() -> ! {
                 }
                 freertos_rust::CurrentTask::delay(Duration::ms(1));
             }
-        }).unwrap();
+        })
+        .unwrap();
 
     Task::new()
         .name("DISPLAY TASK")
         .stack_size(1024)
         .priority(TaskPriority(2))
         .start(move || {
-
             // The image is an RGB565 encoded BMP, so specifying the type as `Image<Bmp<Rgb565>>` will read
             // the pixels correctly
             let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(32, 0));
@@ -411,7 +422,10 @@ fn main() -> ! {
             freertos_rust::CurrentTask::delay(Duration::ms(1000));
 
             loop {
-                display.clear();
+                if check_shutdown() {
+                    break;
+                }
+                display.clear(BinaryColor::Off).unwrap();
 
                 let mut t1 = None;
                 let mut t2 = None;
@@ -432,94 +446,126 @@ fn main() -> ! {
 
                 match t1 {
                     None => {
-                        Text::new("T1 = - ",
-                                  Point::new(0, 10),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            "T1 = - ",
+                            Point::new(0, 10),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                     Some(t) => {
-                        Text::new(arrform!(128, "T1 = {:.2}", t).as_str(),
-                                  Point::new(0, 10),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            arrform!(128, "T1 = {:.2}", t).as_str(),
+                            Point::new(0, 10),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                 }
 
                 match t2 {
                     None => {
-                        Text::new("T2 = - ",
-                                  Point::new(0, 20),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            "T2 = - ",
+                            Point::new(0, 20),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                     Some(t) => {
-                        Text::new(arrform!(128, "T2 = {:.2}", t).as_str(),
-                                  Point::new(0, 20),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            arrform!(128, "T2 = {:.2}", t).as_str(),
+                            Point::new(0, 20),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                 }
 
                 match t3 {
                     None => {
-                        Text::new("T3 = - ",
-                                  Point::new(0, 30),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            "T3 = - ",
+                            Point::new(0, 30),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                     Some(t) => {
-                        Text::new(arrform!(128, "T3 = {:.2}", t).as_str(),
-                                  Point::new(0, 30),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            arrform!(128, "T3 = {:.2}", t).as_str(),
+                            Point::new(0, 30),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                 }
 
                 match t4 {
                     None => {
-                        Text::new("T4 = - ",
-                                  Point::new(0, 40),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            "T4 = - ",
+                            Point::new(0, 40),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                     Some(t) => {
-                        Text::new(arrform!(128, "T4 = {:.2}", t).as_str(),
-                                  Point::new(0, 40),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            arrform!(128, "T4 = {:.2}", t).as_str(),
+                            Point::new(0, 40),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                 }
 
                 match t5 {
                     None => {
-                        Text::new("T5 = - ",
-                                  Point::new(0, 50),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            "T5 = - ",
+                            Point::new(0, 50),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                     Some(t) => {
-                        Text::new(arrform!(128, "T5 = {:.2}", t).as_str(),
-                                  Point::new(0, 50),
-                                  MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                        ).draw(&mut display).unwrap();
+                        Text::new(
+                            arrform!(128, "T5 = {:.2}", t).as_str(),
+                            Point::new(0, 50),
+                            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                        )
+                        .draw(&mut display)
+                        .unwrap();
                     }
                 }
 
                 cortex_m::interrupt::free(|cs| {
-                    pos = G_ENC_STATE
-                        .borrow(cs)
-                        .get();
+                    pos = G_ENC_STATE.borrow(cs).get();
                 });
 
-                Text::new(arrform!(128, "enc = {:}", pos).as_str(),
-                          Point::new(0, 60),
-                          MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-                ).draw(&mut display).unwrap();
+                Text::new(
+                    arrform!(128, "enc = {:}", pos).as_str(),
+                    Point::new(0, 60),
+                    MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+                )
+                .draw(&mut display)
+                .unwrap();
 
                 display.flush().unwrap();
                 freertos_rust::CurrentTask::delay(Duration::ms(100));
             }
-        }).unwrap();
+        })
+        .unwrap();
 
     Task::new()
         .name("USB TASK")
@@ -535,6 +581,12 @@ fn main() -> ! {
             let mut state = State::Idle;
 
             loop {
+                if check_shutdown() {
+                    usb_println("a panic occurred... stopping all threads...");
+                    CurrentTask::delay(Duration::ms(1000));
+                    break;
+                }
+
                 // gather all states
                 match temperature_data_container_usb.lock(Duration::ms(1)) {
                     Ok(temperature_data_temp) => {
@@ -573,31 +625,10 @@ fn main() -> ! {
                 usb_read(&mut message_bytes);
                 match core::str::from_utf8(&message_bytes) {
                     Ok(cmd) => {
-                        extract_command(cmd, &mut interface, &mut out_data, &mut pump, &mut hk, &mut hk_rate);
+                        extract_command(cmd, &command_queue_usb, &mut hk, &mut hk_rate);
                     }
                     Err(_) => {}
                 }
-
-                // update containers
-                match out_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(mut out_data_temp) => {
-                        *out_data_temp = out_data.clone();
-                    }
-                    Err(_) => {}
-                }
-                match interface_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(mut interface_temp) => {
-                        *interface_temp = interface.clone();
-                    }
-                    Err(_) => {}
-                }
-                match pump_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(mut pump_temp) => {
-                        *pump_temp = pump.clone();
-                    }
-                    Err(_) => {}
-                }
-
 
                 // sample frequency
                 freertos_rust::CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
@@ -605,7 +636,8 @@ fn main() -> ! {
                 freertos_rust::CurrentTask::delay(Duration::ms(hk_rate as u32 / 2));
                 stat_led.toggle();
             }
-        }).unwrap();
+        })
+        .unwrap();
 
     Task::new()
         .name("MAIN TASK")
@@ -620,8 +652,13 @@ fn main() -> ! {
             let mut state = State::Idle;
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
+            let main_task_period: u32 = 100;
+            let mut extraction_time = 20 * main_task_period;
 
             loop {
+                if check_shutdown() {
+                    break;
+                }
 
                 // gather all containers
                 match temperature_data_container_main.lock(Duration::ms(1)) {
@@ -655,14 +692,145 @@ fn main() -> ! {
                     Err(_) => {}
                 }
 
+                let cmd = command_queue_main.receive(Duration::infinite()).unwrap();
+                match cmd {
+                    Command::TriggerExtraction(time) => {
+                        extraction_time = (time * main_task_period as f32) as u32;
+                        state = State::Extracting;
+                    }
+                    Command::CoffeeTemperature(temperature) => {
+                        match interface_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut interface_temp) => {
+                                interface_temp.coffee_temperature = temperature;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::SteamTemperature(temperature) => {
+                        match interface_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut interface_temp) => {
+                                interface_temp.steam_temperature = temperature;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::Pump(state) => match pump_data_container_main.lock(Duration::ms(1)) {
+                        Ok(mut pump_temp) => {
+                            pump_temp.enable = state;
+                        }
+                        Err(_) => {}
+                    },
+                    Command::PumpPower(pwr) => {
+                        match pump_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pump_temp) => {
+                                pump_temp.extract_power = pwr as f32;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::PumpHeatUpPower(pwr) => {
+                        match pump_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pump_temp) => {
+                                pump_temp.heat_up_power = pwr as f32;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::PumpPreInfusePower(pwr) => {
+                        match pump_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pump_temp) => {
+                                pump_temp.pre_infuse_power = pwr as f32;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::PumpCoffeePower(pwr) => {
+                        match pump_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pump_temp) => {
+                                pump_temp.extract_power = pwr as f32;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::PumpSteamPower(pwr) => {
+                        match pump_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pump_temp) => {
+                                pump_temp.steam_power = pwr as f32;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::Valve1(state) => {
+                        if state {
+                            valve1_pin.set_high()
+                        } else {
+                            valve1_pin.set_low()
+                        }
+                    }
+                    Command::Valve2(state) => {
+                        if state {
+                            valve2_pin.set_high()
+                        } else {
+                            valve2_pin.set_low()
+                        }
+                    }
+                    Command::Heating(state) => {
+                        match out_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pid_data) => {
+                                pid_data.enable = state;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::Boiler1(_pwr) => {}
+                    Command::Boiler2(_pwr) => {}
+                    Command::WindowSize(window_size) => {
+                        match out_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pid_data) => {
+                                pid_data.window_size = window_size as u32;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Command::PidP(p) => match out_data_container_main.lock(Duration::ms(1)) {
+                        Ok(mut pid_data) => {
+                            pid_data.kp = p;
+                        }
+                        Err(_) => {}
+                    },
+                    Command::PidI(i) => match out_data_container_main.lock(Duration::ms(1)) {
+                        Ok(mut pid_data) => {
+                            pid_data.ki = i;
+                        }
+                        Err(_) => {}
+                    },
+                    Command::PidD(d) => match out_data_container_main.lock(Duration::ms(1)) {
+                        Ok(mut pid_data) => {
+                            pid_data.kd = d;
+                        }
+                        Err(_) => {}
+                    },
+                    Command::PidMaxVal(max_val) => {
+                        match out_data_container_main.lock(Duration::ms(1)) {
+                            Ok(mut pid_data) => {
+                                pid_data.max_val = max_val;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                }
+
                 // state-machine
                 match state {
                     State::Idle => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
+                        valve1_pin.set_low();
+                        valve2_pin.set_low();
                         led_state = LedState::Off;
                         out_data.enable = false;
-                        if interface.button && !water_low {  // TODO: check button pin
+                        if interface.button && !water_low {
+                            // TODO: check button pin
                             state = State::CoffeeHeating;
                             interface.button = false;
                         }
@@ -672,8 +840,12 @@ fn main() -> ! {
                         bldc_en.set_low();
                         out_data.enable = true;
                         led_state = LedState::SlowSine;
+                        valve1_pin.set_high();
                         if let Some(temperature) = temperature_data.t1 {
-                            if interface.coffee_temperature * 0.95 <= temperature && temperature <= 1.05 * interface.coffee_temperature {
+                            if interface.coffee_temperature * 0.95 <= temperature
+                                && temperature <= 1.05 * interface.coffee_temperature
+                            {
+                                valve1_pin.set_low();
                                 state = State::Ready;
                             }
                         }
@@ -681,8 +853,11 @@ fn main() -> ! {
                     State::Ready => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
+                        valve1_pin.set_low();
+                        valve2_pin.set_low();
                         led_state = LedState::On;
-                        if interface.lever_switch {  // TODO: check switch pin
+                        if interface.lever_switch {
+                            // TODO: check switch pin
                             state = State::PreInfuse;
                             interface.lever_switch = false;
                             timer = 0;
@@ -691,6 +866,8 @@ fn main() -> ! {
                     State::PreInfuse => {
                         bldc_pwm.set_duty(max_duty * (pump.pre_infuse_power / 100.0) as u16);
                         bldc_en.set_low();
+                        valve1_pin.set_low();
+                        valve2_pin.set_low();
                         led_state = LedState::SlowBlink;
                         // timer of 5s
                         if timer >= 100 {
@@ -701,9 +878,12 @@ fn main() -> ! {
                     State::Extracting => {
                         bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
                         bldc_en.set_low();
+                        valve1_pin.set_low();
+                        valve2_pin.set_low();
                         led_state = LedState::FastBlink;
+                        valve2_pin.set_high();
                         // timeout of 30s
-                        if timer >= 3000 {
+                        if timer >= extraction_time {
                             state = State::Ready;
                         }
                     }
@@ -712,7 +892,9 @@ fn main() -> ! {
                         bldc_en.set_high();
                         led_state = LedState::SlowSine;
                         if let Some(temperature) = temperature_data.t2 {
-                            if interface.steam_temperature * 0.95 <= temperature && temperature <= 1.05 * interface.steam_temperature {
+                            if interface.steam_temperature * 0.95 <= temperature
+                                && temperature <= 1.05 * interface.steam_temperature
+                            {
                                 state = State::Ready;
                             }
                         }
@@ -721,6 +903,9 @@ fn main() -> ! {
                         bldc_pwm.set_duty(max_duty * (pump.steam_power / 100.0) as u16);
                         bldc_en.set_low();
                         led_state = LedState::FastBlink;
+                        valve2_pin.set_high();
+                        // TODO: set exit condition here
+                        valve2_pin.set_low();
                     }
                 }
 
@@ -757,9 +942,10 @@ fn main() -> ! {
                     Err(_) => {}
                 }
 
-                freertos_rust::CurrentTask::delay(Duration::ms(50));
+                freertos_rust::CurrentTask::delay(Duration::ms(main_task_period));
             }
-        }).unwrap();
+        })
+        .unwrap();
 
     Task::new()
         .name("LED TASK")
@@ -770,6 +956,10 @@ fn main() -> ! {
             let max_duty = led_pwm.get_max_duty();
             let mut count = 0;
             loop {
+                if check_shutdown() {
+                    break;
+                }
+
                 match led_state_container_led.lock(Duration::ms(1)) {
                     Ok(led_state_temp) => {
                         led_state = led_state_temp.clone();
@@ -784,7 +974,8 @@ fn main() -> ! {
                         led_pwm.set_duty(max_duty);
                     }
                     LedState::SlowSine => {
-                        let val = max_duty - (max_duty as f32 * (count as f32 / 1024.0 * PI).sin()) as u16; // LED1
+                        let val = max_duty
+                            - (max_duty as f32 * (count as f32 / 1024.0 * PI).sin()) as u16; // LED1
                         led_pwm.set_duty(val);
                     }
                     LedState::FastBlink => {
@@ -803,7 +994,8 @@ fn main() -> ! {
                 count += 10;
                 freertos_rust::CurrentTask::delay(Duration::ms(25));
             }
-        }).unwrap();
+        })
+        .unwrap();
 
     // Task::new()
     //     .name("BUZZER TASK")
@@ -841,6 +1033,10 @@ fn main() -> ! {
     //         let tempo = 300_u32;
     //
     //         loop {
+    //             if check_shutdown() {
+    //                 break;
+    //             }
+    //
     //             // 1. Obtain a note in the tune
     //             for note in tune {
     //                 // 2. Retrieve the freqeuncy and beat associated with the note
@@ -877,26 +1073,40 @@ fn main() -> ! {
     FreeRtosUtils::start_scheduler();
 }
 
+#[panic_handler]
+unsafe fn custom_panic_handler(_info: &PanicInfo) -> ! {
+    // Safety: the GPIO peripheral is static, and we're not racing anyone by
+    // definition since we're in the process of panicking to a halt.
+
+    // here we stop all other threads
+    cortex_m::interrupt::free(|_| unsafe { SHUTDOWN = true });
+    CurrentTask::delay(Duration::ms(100));
+
+    let dp = Peripherals::steal();
+
+    // Turn off the Heater, it's connected to pin PC6.
+    // initialize ports
+    dp.GPIOC.odr.write(|w| w.odr6().clear_bit());
+    dp.GPIOE.odr.write(|w| w.odr4().clear_bit());
+
+    // sets it into debug-mode and sets a breakpoint
+    asm::bkpt();
+
+    loop {}
+}
 
 #[exception]
 #[allow(non_snake_case)]
 unsafe fn DefaultHandler(_irqn: i16) {
-// custom default handler
-// irqn is negative for Cortex-M exceptions
-// irqn is positive for device specific (line IRQ)
-// panic!("Exception: {}", irqn);
+    // custom default handler
+    // irqn is negative for Cortex-M exceptions
+    // irqn is positive for device specific (line IRQ)
+    // panic!("Exception: {}", irqn);
 }
 
 #[exception]
 #[allow(non_snake_case)]
 unsafe fn HardFault(_ef: &ExceptionFrame) -> ! {
-    loop {}
-}
-
-// define what happens in an Out Of Memory (OOM) condition
-#[alloc_error_handler]
-fn alloc_error(_layout: Layout) -> ! {
-    asm::bkpt();
     loop {}
 }
 

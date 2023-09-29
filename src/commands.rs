@@ -1,6 +1,35 @@
+use alloc::sync::Arc;
+
 use arrform::{arrform, ArrForm};
-use crate::{usb_println};
-use crate::utils::{Interface, PidData, MeasuredData, State, PumpData};
+use freertos_rust::{Duration, Queue};
+
+use crate::usb_println;
+use crate::utils::{Interface, MeasuredData, PidData, State};
+
+#[derive(Copy, Clone, Debug)]
+pub enum Command {
+    TriggerExtraction(f32),
+    CoffeeTemperature(f32),
+    SteamTemperature(f32),
+    Pump(bool),
+    PumpPower(i16),
+    PumpHeatUpPower(i16),
+    PumpPreInfusePower(i16),
+    PumpCoffeePower(i16),
+    PumpSteamPower(i16),
+    Valve1(bool),
+    Valve2(bool),
+    Heating(bool),
+    Boiler1(i16),
+    Boiler2(i16),
+    WindowSize(f32),
+    PidP(f32),
+    PidI(f32),
+    PidD(f32),
+    PidMaxVal(f32),
+}
+
+const CMD_QUEUE_TIMEOUT: u32 = 5;
 
 fn extract_value(cmd: &str) -> Option<f32> {
     let mut start_index = 0;
@@ -22,9 +51,7 @@ fn extract_value(cmd: &str) -> Option<f32> {
 
 pub fn extract_command(
     cmd: &str,
-    interface: &mut Interface,
-    output: &mut PidData,
-    pump: &mut PumpData,
+    command_queue: &Arc<Queue<Command>>,
     hk: &mut bool,
     hk_period: &mut f32,
 ) {
@@ -35,8 +62,15 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set coffee temperature = {}", val).as_str());
-                    interface.coffee_temperature = val;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set coffee temperature = {}", val).as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::CoffeeTemperature(val),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setSteamTemperature=") {
@@ -45,8 +79,15 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set steam temperature = {}", val).as_str());
-                    interface.steam_temperature = val;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set steam temperature = {}", val).as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::SteamTemperature(val),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] triggerExtraction=") {
@@ -55,9 +96,20 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, triggering extraction for = {} seconds", val).as_str());
-                    interface.trigger_extraction = true;
-                    pump.extraction_timeout = val;
+                    usb_println(
+                        arrform!(
+                            64,
+                            "[ACK] cmd OK, triggering extraction for = {} seconds",
+                            val
+                        )
+                            .as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::TriggerExtraction(val),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setP=") {
@@ -66,8 +118,10 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set p value = {}", val).as_str());
-                    output.kp = val;
+                    usb_println(arrform!(64, "[ACK] cmd OK, set p value = {}", val).as_str());
+                    command_queue
+                        .send(Command::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setI=") {
@@ -76,8 +130,10 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set i value = {}", val).as_str());
-                    output.ki = val;
+                    usb_println(arrform!(64, "[ACK] cmd OK, set i value = {}", val).as_str());
+                    command_queue
+                        .send(Command::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setD=") {
@@ -86,8 +142,10 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set d value = {}", val).as_str());
-                    output.kd = val;
+                    usb_println(arrform!(64, "[ACK] cmd OK, set d value = {}", val).as_str());
+                    command_queue
+                        .send(Command::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setWindowSize=") {
@@ -96,8 +154,12 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set window size = {} ms", val).as_str());
-                    output.window_size = val as u32;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set window size = {} ms", val).as_str(),
+                    );
+                    command_queue
+                        .send(Command::WindowSize(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setPIDMaxVal=") {
@@ -106,8 +168,10 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set PID max value = {}", val).as_str());
-                    output.max_val = val;
+                    usb_println(arrform!(64, "[ACK] cmd OK, set PID max value = {}", val).as_str());
+                    command_queue
+                        .send(Command::PidMaxVal(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setPumpCoffeePower=") {
@@ -116,8 +180,15 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set pump coffee power = {}", val).as_str());
-                    pump.extract_power = val;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set pump coffee power = {}", val).as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::PumpCoffeePower(val as i16),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setPumpSteamPower=") {
@@ -126,8 +197,15 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set pump steam power = {}", val).as_str());
-                    pump.steam_power = val;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set pump steam power = {}", val).as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::PumpSteamPower(val as i16),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setPumpPreInfusePower=") {
@@ -136,8 +214,15 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set pump pre-infuse power = {}", val).as_str());
-                    pump.pre_infuse_power = val;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set pump pre-infuse power = {}", val).as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::PumpPreInfusePower(val as i16),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] setPumpHeatUpPower=") {
@@ -146,37 +231,65 @@ pub fn extract_command(
                     cmd_has_no_value();
                 }
                 Some(val) => {
-                    usb_println(arrform!(64,"[ACK] cmd OK, set pump heat up cycling power = {}", val).as_str());
-                    pump.heat_up_power = val;
+                    usb_println(
+                        arrform!(64, "[ACK] cmd OK, set pump heat up cycling power = {}", val)
+                            .as_str(),
+                    );
+                    command_queue
+                        .send(
+                            Command::PumpHeatUpPower(val as i16),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
                 }
             }
         } else if cmd.contains("[CMD] openValve1") {
-            interface.valve1 = true;
+            command_queue
+                .send(Command::Valve1(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] closeValve1") {
-            interface.valve1 = false;
+            command_queue
+                .send(Command::Valve1(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] openValve2") {
-            interface.valve2 = true;
+            command_queue
+                .send(Command::Valve2(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] closeValve2") {
-            interface.valve2 = false;
+            command_queue
+                .send(Command::Valve2(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] startHeating") {
-            output.enable = true;
+            command_queue
+                .send(Command::Heating(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] stopHeating") {
-            output.enable = false;
+            command_queue
+                .send(Command::Heating(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] startPump") {
-            pump.enable = true;
+            command_queue
+                .send(Command::Pump(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] stopPump") {
-            pump.enable = false;
+            command_queue
+                .send(Command::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] stopAll") {
-            pump.enable = false;
-            output.enable = false;
+            command_queue
+                .send(Command::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
+            command_queue
+                .send(Command::Heating(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .unwrap();
             cmd_ok();
         } else if cmd.contains("[CMD] disableHK") {
             *hk = false;
@@ -189,9 +302,12 @@ pub fn extract_command(
                 Some(r) => {
                     if r <= 100.0 {
                         *hk_period = 1000.0 / r;
-                        usb_println(arrform!(64,"[ACK] cmd OK, set HK rate = {}", r).as_str());
+                        usb_println(arrform!(64, "[ACK] cmd OK, set HK rate = {}", r).as_str());
                     } else {
-                        usb_println(arrform!(64,"[ACK] error, value = {} is too large (> 100)", r).as_str());
+                        usb_println(
+                            arrform!(64, "[ACK] error, value = {} is too large (> 100)", r)
+                                .as_str(),
+                        );
                     }
                 }
                 None => {
@@ -214,7 +330,7 @@ pub fn cmd_ok() {
 }
 
 pub fn cmd_has_no_value() {
-    usb_println(arrform!(64,"[ACK] error = no value found").as_str());
+    usb_println(arrform!(64, "[ACK] error = no value found").as_str());
 }
 
 pub fn send_housekeeping(
@@ -226,7 +342,7 @@ pub fn send_housekeeping(
 ) {
     let hk = arrform!(
         128,
-        "[HK] {:?}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}, {}",
+        "[HK] {:?}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}",
         state,
         interface.lever_switch,
         interface.steam_open,
@@ -237,6 +353,7 @@ pub fn send_housekeeping(
         temperatures.t4.unwrap_or(0.0),
         temperatures.t5.unwrap_or(0.0),
         // TODO: pressure value!
+        interface.coffee_temperature,
         output.p,
         output.i,
         output.d,

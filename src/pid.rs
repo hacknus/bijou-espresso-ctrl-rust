@@ -1,4 +1,3 @@
-
 pub struct PID {
     pub p: f32,
     pub i: f32,
@@ -12,9 +11,8 @@ pub struct PID {
     prev_time: u32,
     pub target: f32,
     pub window_size: u32,
-    pub max_val: f32
+    pub max_val: f32,
 }
-
 
 impl PID {
     pub fn new() -> Self {

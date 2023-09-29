@@ -1,9 +1,9 @@
 use core::cell::{Cell, RefCell};
-use panic_halt as _;
+
 use cortex_m::interrupt::Mutex;
 use stm32f4xx_hal::{
-    pac::{interrupt},
     gpio::{self, Input},
+    pac::interrupt,
     prelude::*,
 };
 
@@ -48,4 +48,3 @@ fn EXTI9_5() {
         button_b.as_mut().unwrap().clear_interrupt_pending_bit();
     });
 }
-

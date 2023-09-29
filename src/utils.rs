@@ -8,7 +8,6 @@ pub struct MeasuredData {
     pub p: Option<f32>,
 }
 
-
 #[derive(Clone)]
 pub struct PumpData {
     pub heat_up_power: f32,
@@ -65,6 +64,7 @@ impl Default for PidData {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum State {
     Idle,
@@ -84,7 +84,6 @@ pub enum LedState {
     SlowBlink,
     FastBlink,
 }
-
 
 #[derive(Clone)]
 pub struct Interface {

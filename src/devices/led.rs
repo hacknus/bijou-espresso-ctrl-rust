@@ -7,12 +7,8 @@ pub struct LED<const P: char, const N: u8> {
 
 #[allow(dead_code)]
 impl<const P: char, const N: u8> LED<P, N> {
-    pub fn new(
-        pin: Pin<P, N, Output>) -> Self {
-        LED {
-            pin,
-            state: false,
-        }
+    pub fn new(pin: Pin<P, N, Output>) -> Self {
+        LED { pin, state: false }
     }
 
     pub fn toggle(&mut self) {
