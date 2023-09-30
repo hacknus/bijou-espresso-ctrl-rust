@@ -513,15 +513,14 @@ fn main() -> ! {
                 let mut t4 = None;
                 let mut t5 = None;
 
-                match temperature_data_container_display.lock(Duration::ms(1)) {
-                    Ok(temperature_data) => {
-                        t1 = temperature_data.t1;
-                        t2 = temperature_data.t2;
-                        t3 = temperature_data.t3;
-                        t4 = temperature_data.t4;
-                        t5 = temperature_data.t5;
-                    }
-                    Err(_) => {}
+                if let Ok(temperature_data) =
+                    temperature_data_container_display.lock(Duration::ms(1))
+                {
+                    t1 = temperature_data.t1;
+                    t2 = temperature_data.t2;
+                    t3 = temperature_data.t3;
+                    t4 = temperature_data.t4;
+                    t5 = temperature_data.t5;
                 }
 
                 match t1 {
@@ -668,53 +667,37 @@ fn main() -> ! {
                 }
 
                 // gather all states
-                match temperature_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(temperature_data_temp) => {
-                        temperature_data = temperature_data_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(temperature_data_temp) =
+                    temperature_data_container_usb.lock(Duration::ms(1))
+                {
+                    temperature_data = temperature_data_temp.clone();
                 }
-                match pid_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(pid_data_temp) => {
-                        pid_data = pid_data_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(pid_data_temp) = pid_data_container_usb.lock(Duration::ms(1)) {
+                    pid_data = pid_data_temp.clone();
                 }
-                match interface_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(interface_temp) => {
-                        interface = interface_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(interface_temp) = interface_data_container_usb.lock(Duration::ms(1)) {
+                    interface = interface_temp.clone();
                 }
-                match pump_data_container_usb.lock(Duration::ms(1)) {
-                    Ok(pump_temp) => {
-                        pump = pump_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(pump_temp) = pump_data_container_usb.lock(Duration::ms(1)) {
+                    pump = pump_temp.clone();
                 }
-                match state_container_usb.lock(Duration::ms(1)) {
-                    Ok(state_temp) => {
-                        state = state_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(state_temp) = state_container_usb.lock(Duration::ms(1)) {
+                    state = state_temp.clone();
                 }
 
                 send_housekeeping(&state, &temperature_data, &interface, &pid_data, &pump, "");
 
                 let mut message_bytes = [0; 1024];
                 usb_read(&mut message_bytes);
-                match core::str::from_utf8(&message_bytes) {
-                    Ok(cmd) => {
-                        extract_command(
-                            cmd,
-                            &heater_command_queue_usb,
-                            &pump_command_queue_usb,
-                            &valve_command_queue_usb,
-                            &mut hk,
-                            &mut hk_rate,
-                        );
-                    }
-                    Err(_) => {}
+                if let Ok(cmd) = core::str::from_utf8(&message_bytes) {
+                    extract_command(
+                        cmd,
+                        &heater_command_queue_usb,
+                        &pump_command_queue_usb,
+                        &valve_command_queue_usb,
+                        &mut hk,
+                        &mut hk_rate,
+                    );
                 }
 
                 // sample frequency
@@ -748,35 +731,22 @@ fn main() -> ! {
                 }
 
                 // gather all containers
-                match temperature_data_container_main.lock(Duration::ms(1)) {
-                    Ok(temperature_data_temp) => {
-                        temperature_data = temperature_data_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(temperature_data_temp) =
+                    temperature_data_container_main.lock(Duration::ms(1))
+                {
+                    temperature_data = temperature_data_temp.clone();
                 }
-                match pid_data_container_main.lock(Duration::ms(1)) {
-                    Ok(pid_data_temp) => {
-                        pid_data = pid_data_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(pid_data_temp) = pid_data_container_main.lock(Duration::ms(1)) {
+                    pid_data = pid_data_temp.clone();
                 }
-                match interface_data_container_main.lock(Duration::ms(1)) {
-                    Ok(interface_temp) => {
-                        interface = interface_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(interface_temp) = interface_data_container_main.lock(Duration::ms(1)) {
+                    interface = interface_temp.clone();
                 }
-                match pump_data_container_main.lock(Duration::ms(1)) {
-                    Ok(pump_temp) => {
-                        pump = pump_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(pump_temp) = pump_data_container_main.lock(Duration::ms(1)) {
+                    pump = pump_temp.clone();
                 }
-                match state_container_main.lock(Duration::ms(1)) {
-                    Ok(state_temp) => {
-                        state = state_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(state_temp) = state_container_main.lock(Duration::ms(1)) {
+                    state = state_temp.clone();
                 }
 
                 if let Ok(cmd) = valve_command_queue_main.receive(Duration::infinite()) {
@@ -801,51 +771,45 @@ fn main() -> ! {
                 if let Ok(cmd) = pump_command_queue_main.receive(Duration::infinite()) {
                     match cmd {
                         PumpCommand::Pump(state) => {
-                            match pump_data_container_main.lock(Duration::ms(1)) {
-                                Ok(mut pump_temp) => {
-                                    pump_temp.enable = state;
-                                }
-                                Err(_) => {}
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(1))
+                            {
+                                pump_temp.enable = state;
                             }
                         }
                         PumpCommand::PumpPower(pwr) => {
-                            match pump_data_container_main.lock(Duration::ms(1)) {
-                                Ok(mut pump_temp) => {
-                                    pump_temp.extract_power = pwr as f32;
-                                }
-                                Err(_) => {}
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(1))
+                            {
+                                pump_temp.extract_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpHeatUpPower(pwr) => {
-                            match pump_data_container_main.lock(Duration::ms(1)) {
-                                Ok(mut pump_temp) => {
-                                    pump_temp.heat_up_power = pwr as f32;
-                                }
-                                Err(_) => {}
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(1))
+                            {
+                                pump_temp.heat_up_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpPreInfusePower(pwr) => {
-                            match pump_data_container_main.lock(Duration::ms(1)) {
-                                Ok(mut pump_temp) => {
-                                    pump_temp.pre_infuse_power = pwr as f32;
-                                }
-                                Err(_) => {}
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(1))
+                            {
+                                pump_temp.pre_infuse_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpCoffeePower(pwr) => {
-                            match pump_data_container_main.lock(Duration::ms(1)) {
-                                Ok(mut pump_temp) => {
-                                    pump_temp.extract_power = pwr as f32;
-                                }
-                                Err(_) => {}
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(1))
+                            {
+                                pump_temp.extract_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpSteamPower(pwr) => {
-                            match pump_data_container_main.lock(Duration::ms(1)) {
-                                Ok(mut pump_temp) => {
-                                    pump_temp.steam_power = pwr as f32;
-                                }
-                                Err(_) => {}
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(1))
+                            {
+                                pump_temp.steam_power = pwr as f32;
                             }
                         }
                     }
@@ -947,24 +911,16 @@ fn main() -> ! {
                 }
 
                 // send states
-                match led_state_container_main.lock(Duration::ms(1)) {
-                    Ok(mut led_state_temp) => {
-                        *led_state_temp = led_state.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(mut led_state_temp) = led_state_container_main.lock(Duration::ms(1)) {
+                    *led_state_temp = led_state.clone();
                 }
-                match state_container_main.lock(Duration::ms(1)) {
-                    Ok(mut state_temp) => {
-                        *state_temp = state.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(mut state_temp) = state_container_main.lock(Duration::ms(1)) {
+                    *state_temp = state.clone();
                 }
-                match interface_data_container_main.lock(Duration::ms(1)) {
-                    Ok(mut interface_temp) => {
-                        interface_temp.button = interface.button;
-                        interface_temp.lever_switch = interface.lever_switch;
-                    }
-                    Err(_) => {}
+                if let Ok(mut interface_temp) = interface_data_container_main.lock(Duration::ms(1))
+                {
+                    interface_temp.button = interface.button;
+                    interface_temp.lever_switch = interface.lever_switch;
                 }
 
                 CurrentTask::delay(Duration::ms(main_task_period));
@@ -985,11 +941,8 @@ fn main() -> ! {
                     break;
                 }
 
-                match led_state_container_led.lock(Duration::ms(1)) {
-                    Ok(led_state_temp) => {
-                        led_state = led_state_temp.clone();
-                    }
-                    Err(_) => {}
+                if let Ok(led_state_temp) = led_state_container_led.lock(Duration::ms(1)) {
+                    led_state = led_state_temp.clone();
                 }
                 match led_state {
                     LedState::Off => {
