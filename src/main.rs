@@ -301,49 +301,42 @@ fn main() -> ! {
                     break;
                 }
 
-                let t1;
-                let t2;
-                let t3;
-                let t4;
-                let t5;
+                let t1 = if max31865_1_state.is_ok() {
+                    max31865_1.get_temperature()
+                } else {
+                    None
+                };
+                let t2 = if max31865_2_state.is_ok() {
+                    max31865_2.get_temperature()
+                } else {
+                    None
+                };
+                let t3 = if max31865_3_state.is_ok() {
+                    max31865_3.get_temperature()
+                } else {
+                    None
+                };
+                let t4 = if max31865_4_state.is_ok() {
+                    max31865_4.get_temperature()
+                } else {
+                    None
+                };
+                let t5 = if max31865_5_state.is_ok() {
+                    max31865_5.get_temperature()
+                } else {
+                    None
+                };
 
-                if max31865_1_state.is_ok() {
-                    t1 = max31865_1.get_temperature();
-                } else {
-                    t1 = None;
+                if let Ok(mut temperature_data) =
+                    temperature_data_container_adc.lock(Duration::ms(1))
+                {
+                    temperature_data.t1 = t1;
+                    temperature_data.t2 = t2;
+                    temperature_data.t3 = t3;
+                    temperature_data.t4 = t4;
+                    temperature_data.t5 = t5;
                 }
-                if max31865_2_state.is_ok() {
-                    t2 = max31865_2.get_temperature();
-                } else {
-                    t2 = None;
-                }
-                if max31865_3_state.is_ok() {
-                    t3 = max31865_3.get_temperature();
-                } else {
-                    t3 = None;
-                }
-                if max31865_4_state.is_ok() {
-                    t4 = max31865_4.get_temperature();
-                } else {
-                    t4 = None;
-                }
-                if max31865_5_state.is_ok() {
-                    t5 = max31865_5.get_temperature();
-                } else {
-                    t5 = None;
-                }
-
-                match temperature_data_container_adc.lock(Duration::ms(1)) {
-                    Ok(mut temperature_data) => {
-                        temperature_data.t1 = t1;
-                        temperature_data.t2 = t2;
-                        temperature_data.t3 = t3;
-                        temperature_data.t4 = t4;
-                        temperature_data.t5 = t5;
-                    }
-                    Err(_) => {}
-                }
-                freertos_rust::CurrentTask::delay(Duration::ms(100));
+                CurrentTask::delay(Duration::ms(100));
             }
         })
         .unwrap();
