@@ -30,8 +30,8 @@ pub enum HeaterCommand {
 
 #[derive(Copy, Clone, Debug)]
 pub enum ValveCommand {
-    Valve1(bool),
-    Valve2(bool),
+    Valve1(Option<bool>),
+    Valve2(Option<bool>),
 }
 
 const CMD_QUEUE_TIMEOUT: u32 = 5;
@@ -198,24 +198,46 @@ pub fn extract_command(
                     arrform!(64, "[ACK] cmd OK, set pump heat up cycling power = {}", val)
                 }
             }
-        } else if cmd.contains("[CMD] openValve1") {
+        } else if cmd.contains("[CMD] OverrideValve1=Open") {
             valve_command_queue
-                .send(ValveCommand::Valve1(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(
+                    ValveCommand::Valve1(Some(true)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok()
-        } else if cmd.contains("[CMD] closeValve1") {
+        } else if cmd.contains("[CMD] OverrideValve1=Close") {
             valve_command_queue
-                .send(ValveCommand::Valve1(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(
+                    ValveCommand::Valve1(Some(false)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok()
-        } else if cmd.contains("[CMD] openValve2") {
+        } else if cmd.contains("[CMD] ClearValve1Override") {
             valve_command_queue
-                .send(ValveCommand::Valve2(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(ValveCommand::Valve1(None), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok()
-        } else if cmd.contains("[CMD] closeValve2") {
+        } else if cmd.contains("[CMD] OverrideValve2=Open") {
             valve_command_queue
-                .send(ValveCommand::Valve2(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(
+                    ValveCommand::Valve2(Some(true)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] OverrideValve2=Close") {
+            valve_command_queue
+                .send(
+                    ValveCommand::Valve2(Some(false)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] ClearValve1Override") {
+            valve_command_queue
+                .send(ValveCommand::Valve2(None), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok()
         } else if cmd.contains("[CMD] startHeating") {

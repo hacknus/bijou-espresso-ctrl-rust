@@ -348,20 +348,13 @@ fn main() -> ! {
         .start(move || {
             let mut pid = PID::new();
             let mut current_temperature = None;
-            let mut state = State::Idle;
-
             let mut boiler_override = None;
 
             loop {
                 if check_shutdown() {
-                    heater_2.set_low();
+                    heater_1.set_low();
                     fault_2_led.off();
                     break;
-                }
-
-                // gather all containers
-                if let Ok(state_temp) = state_container_pid.lock(Duration::ms(1)) {
-                    state = state_temp.clone();
                 }
 
                 if let Ok(cmd) = heater_command_queue_pid.receive(Duration::infinite()) {
@@ -404,48 +397,11 @@ fn main() -> ! {
                     pid_temp.d = pid.d;
                     pid_temp.pid_val = pid.val;
                     pid_temp.duty_cycle = pid.duty_cycle;
-
-                    // state-machine
-                    match state {
-                        State::Idle => {
-                            if pid_temp.enable {
-                                state = State::CoffeeHeating;
-                            };
-                        }
-                        State::CoffeeHeating => {
-                            if !pid_temp.enable {
-                                state = State::Idle;
-                            }
-                            if let Some(temperature) = pid_temp.current_temperature {
-                                if pid.target * 0.95 <= temperature
-                                    && temperature <= 1.05 * pid.target
-                                {
-                                    state = State::Ready;
-                                }
-                            }
-                        }
-                        State::Ready => {
-                            if !pid_temp.enable {
-                                state = State::Idle;
-                            }
-                            if let Some(temperature) = pid_temp.current_temperature {
-                                if pid.target * 0.95 > temperature
-                                    || temperature > 1.05 * pid.target
-                                {
-                                    state = State::CoffeeHeating;
-                                }
-                            }
-                        }
-                        State::PreInfuse => {}
-                        State::Extracting => {}
-                        State::SteamHeating => {}
-                        State::Steaming => {}
-                    }
                 }
                 match current_temperature {
                     None => {
                         // if we have no temperature, we need to turn off the heater
-                        heater_2.set_low();
+                        heater_1.set_low();
                         fault_2_led.off();
                         CurrentTask::delay(Duration::ms(pid.window_size));
                     }
@@ -459,27 +415,22 @@ fn main() -> ! {
                             duty_cycle = duty_cycle_override;
                         }
                         if duty_cycle == 0 || !pid.enabled {
-                            heater_2.set_low();
+                            heater_1.set_low();
                             fault_2_led.off();
                             CurrentTask::delay(Duration::ms(pid.window_size));
                         } else if duty_cycle > 0 && duty_cycle < pid.window_size {
-                            heater_2.set_high();
+                            heater_1.set_high();
                             fault_2_led.on();
                             CurrentTask::delay(Duration::ms(duty_cycle));
-                            heater_2.set_low();
+                            heater_1.set_low();
                             fault_2_led.off();
                             CurrentTask::delay(Duration::ms(pid.window_size - duty_cycle));
                         } else if duty_cycle >= pid.window_size {
-                            heater_2.set_high();
+                            heater_1.set_high();
                             fault_2_led.on();
                             CurrentTask::delay(Duration::ms(pid.window_size));
                         }
                     }
-                }
-
-                // send states
-                if let Ok(mut state_temp) = state_container_pid.lock(Duration::ms(1)) {
-                    *state_temp = state.clone();
                 }
             }
         })
@@ -725,6 +676,9 @@ fn main() -> ! {
             let main_task_period: u32 = 100;
             let mut extraction_time = 20 * main_task_period;
 
+            let mut valve_1_override = None;
+            let mut valve_2_override = None;
+
             loop {
                 if check_shutdown() {
                     break;
@@ -749,20 +703,27 @@ fn main() -> ! {
                     state = state_temp.clone();
                 }
 
+                // TODO: this needs to override the state machine!
                 if let Ok(cmd) = valve_command_queue_main.receive(Duration::infinite()) {
                     match cmd {
                         ValveCommand::Valve1(state) => {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
+                            valve_1_override = state;
+                            if let Some(state) = valve_1_override {
+                                if state {
+                                    valve1_pin.set_high()
+                                } else {
+                                    valve1_pin.set_low()
+                                }
                             }
                         }
                         ValveCommand::Valve2(state) => {
-                            if state {
-                                valve2_pin.set_high()
-                            } else {
-                                valve2_pin.set_low()
+                            valve_2_override = state;
+                            if let Some(state) = valve_2_override {
+                                if state {
+                                    valve2_pin.set_high()
+                                } else {
+                                    valve2_pin.set_low()
+                                }
                             }
                         }
                     }
@@ -820,8 +781,24 @@ fn main() -> ! {
                     State::Idle => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
-                        valve1_pin.set_low();
-                        valve2_pin.set_low();
+                        if let Some(state) = valve_1_override {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
+                            }
+                        } else {
+                            valve1_pin.set_low();
+                        }
+                        if let Some(state) = valve_2_override {
+                            if state {
+                                valve2_pin.set_high()
+                            } else {
+                                valve2_pin.set_low()
+                            }
+                        } else {
+                            valve2_pin.set_low();
+                        }
                         led_state = LedState::Off;
                         pid_data.enable = false;
                         if interface.button && !water_low {
@@ -835,12 +812,28 @@ fn main() -> ! {
                         bldc_en.set_low();
                         pid_data.enable = true;
                         led_state = LedState::SlowSine;
-                        valve1_pin.set_high();
+                        if let Some(state) = valve_1_override {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
+                            }
+                        } else {
+                            valve1_pin.set_high();
+                        }
                         if let Some(temperature) = temperature_data.t1 {
                             if interface.coffee_temperature * 0.95 <= temperature
                                 && temperature <= 1.05 * interface.coffee_temperature
                             {
-                                valve1_pin.set_low();
+                                if let Some(state) = valve_1_override {
+                                    if state {
+                                        valve1_pin.set_high()
+                                    } else {
+                                        valve1_pin.set_low()
+                                    }
+                                } else {
+                                    valve1_pin.set_low();
+                                }
                                 state = State::Ready;
                             }
                         }
@@ -848,8 +841,24 @@ fn main() -> ! {
                     State::Ready => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
-                        valve1_pin.set_low();
-                        valve2_pin.set_low();
+                        if let Some(state) = valve_1_override {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
+                            }
+                        } else {
+                            valve1_pin.set_low();
+                        }
+                        if let Some(state) = valve_2_override {
+                            if state {
+                                valve2_pin.set_high()
+                            } else {
+                                valve2_pin.set_low()
+                            }
+                        } else {
+                            valve2_pin.set_low();
+                        }
                         led_state = LedState::On;
                         if interface.lever_switch {
                             // TODO: check switch pin
@@ -861,8 +870,24 @@ fn main() -> ! {
                     State::PreInfuse => {
                         bldc_pwm.set_duty(max_duty * (pump.pre_infuse_power / 100.0) as u16);
                         bldc_en.set_low();
-                        valve1_pin.set_low();
-                        valve2_pin.set_low();
+                        if let Some(state) = valve_1_override {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
+                            }
+                        } else {
+                            valve1_pin.set_low();
+                        }
+                        if let Some(state) = valve_2_override {
+                            if state {
+                                valve2_pin.set_high()
+                            } else {
+                                valve2_pin.set_low()
+                            }
+                        } else {
+                            valve2_pin.set_low();
+                        }
                         led_state = LedState::SlowBlink;
                         // timer of 5s
                         if timer >= 100 {
@@ -873,8 +898,24 @@ fn main() -> ! {
                     State::Extracting => {
                         bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
                         bldc_en.set_low();
-                        valve1_pin.set_low();
-                        valve2_pin.set_low();
+                        if let Some(state) = valve_1_override {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
+                            }
+                        } else {
+                            valve1_pin.set_low();
+                        }
+                        if let Some(state) = valve_2_override {
+                            if state {
+                                valve2_pin.set_high()
+                            } else {
+                                valve2_pin.set_low()
+                            }
+                        } else {
+                            valve2_pin.set_low();
+                        }
                         led_state = LedState::FastBlink;
                         valve2_pin.set_high();
                         // timeout of 30s
@@ -898,9 +939,24 @@ fn main() -> ! {
                         bldc_pwm.set_duty(max_duty * (pump.steam_power / 100.0) as u16);
                         bldc_en.set_low();
                         led_state = LedState::FastBlink;
-                        valve2_pin.set_high();
-                        // TODO: set exit condition here
-                        valve2_pin.set_low();
+                        if let Some(state) = valve_1_override {
+                            if state {
+                                valve1_pin.set_high()
+                            } else {
+                                valve1_pin.set_low()
+                            }
+                        } else {
+                            valve1_pin.set_low();
+                        }
+                        if let Some(state) = valve_2_override {
+                            if state {
+                                valve2_pin.set_high()
+                            } else {
+                                valve2_pin.set_low()
+                            }
+                        } else {
+                            valve2_pin.set_high();
+                        } // TODO: set exit condition here
                     }
                 }
 
