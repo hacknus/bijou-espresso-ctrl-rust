@@ -957,7 +957,8 @@ fn main() -> ! {
                             }
                         } else {
                             valve2_pin.set_high();
-                        } // TODO: set exit condition here
+                        }
+                        // TODO: set exit condition here
                     }
                 }
 
@@ -1018,19 +1019,19 @@ fn main() -> ! {
                     }
                     LedState::FastBlink => {
                         led_pwm.set_duty(0);
-                        freertos_rust::CurrentTask::delay(Duration::ms(250));
+                        CurrentTask::delay(Duration::ms(250));
                         led_pwm.set_duty(max_duty);
-                        freertos_rust::CurrentTask::delay(Duration::ms(225));
+                        CurrentTask::delay(Duration::ms(225));
                     }
                     LedState::SlowBlink => {
                         led_pwm.set_duty(0);
-                        freertos_rust::CurrentTask::delay(Duration::ms(500));
+                        CurrentTask::delay(Duration::ms(500));
                         led_pwm.set_duty(max_duty);
-                        freertos_rust::CurrentTask::delay(Duration::ms(475));
+                        CurrentTask::delay(Duration::ms(475));
                     }
                 }
                 count += 10;
-                freertos_rust::CurrentTask::delay(Duration::ms(25));
+                CurrentTask::delay(Duration::ms(25));
             }
         })
         .unwrap();
@@ -1087,24 +1088,24 @@ fn main() -> ! {
     //                         // 3.2 Enable the channel to generate desired PWM
     //                         buzz_pwm.enable(Channel::C4);
     //                         // 3.3 Keep the output on for as long as required
-    //                         freertos_rust::CurrentTask::delay(Duration::ms(note.1 * tempo));
+    //                         CurrentTask::delay(Duration::ms(note.1 * tempo));
     //                     } else if note.0 == ' ' {
     //                         // 2.2 if ' ' tone is found disable output for one beat
     //                         buzz_pwm.disable(Channel::C4);
-    //                         freertos_rust::CurrentTask::delay(Duration::ms(tempo));
+    //                         CurrentTask::delay(Duration::ms(tempo));
     //                     }
     //                 }
     //                 // 4. Silence for half a beat between notes
     //                 // 4.1 Disable the PWM output (silence)
     //                 buzz_pwm.disable(Channel::C4);
     //                 // 4.2 Keep the output off for half a beat between notes
-    //                 freertos_rust::CurrentTask::delay(Duration::ms(tempo / 2));
+    //                 CurrentTask::delay(Duration::ms(tempo / 2));
     //
     //                 // 5. Go back to 1.
     //             }
     //             let timestamp = timer.now().ticks();
     //             // usb_println(arrform!(64,"t = {:?}", timestamp).as_str());
-    //             freertos_rust::CurrentTask::delay(Duration::ms(1000));
+    //             CurrentTask::delay(Duration::ms(1000));
     //         }
     //     }).unwrap();
 
