@@ -898,6 +898,7 @@ fn main() -> ! {
                     State::Extracting => {
                         bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
                         bldc_en.set_low();
+                        // TODO: we need to set duty cycle to a high value for heating during extraction!
                         if let Some(state) = valve_1_override {
                             if state {
                                 valve1_pin.set_high()
@@ -967,6 +968,9 @@ fn main() -> ! {
                 }
 
                 // send states
+                if let Ok(mut pid_data_temp) = pid_data_container_main.lock(Duration::ms(1)) {
+                    pid_data_temp.enable = pid_data.enable;
+                }
                 if let Ok(mut led_state_temp) = led_state_container_main.lock(Duration::ms(1)) {
                     *led_state_temp = led_state.clone();
                 }
