@@ -61,7 +61,7 @@ impl Default for PidData {
             i: 0.0,
             d: 0.0,
             kp: 1.0,
-            ki: 1.0,
+            ki: 0.0,
             kd: 1.0,
             window_size: 500,
             max_val: 0.0,
