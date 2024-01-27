@@ -47,7 +47,9 @@ use crate::devices::max31865::MAX31865;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::pid::PID;
 use crate::usb::{usb_init, usb_println, usb_read};
-use crate::utils::{Interface, LedState, MeasuredData, PidData, PumpData, State, ValveState};
+use crate::utils::{
+    Interface, LedState, MeasuredData, PidData, PumpData, PumpState, State, ValveState,
+};
 
 mod commands;
 mod devices;
@@ -682,6 +684,8 @@ fn main() -> ! {
             let mut valve_1_override = None;
             let mut valve_2_override = None;
 
+            let mut pump_override = None;
+
             loop {
                 if check_shutdown() {
                     break;
@@ -720,12 +724,8 @@ fn main() -> ! {
 
                 if let Ok(cmd) = pump_command_queue_main.receive(Duration::ms(5)) {
                     match cmd {
-                        PumpCommand::Pump(state) => {
-                            if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(5))
-                            {
-                                pump_temp.enable = state;
-                            }
+                        PumpCommand::PumpOverride(state) => {
+                            pump_override = state;
                         }
                         PumpCommand::PumpPower(pwr) => {
                             if let Ok(mut pump_temp) =
@@ -769,13 +769,13 @@ fn main() -> ! {
 
                 let mut valve1_state = ValveState::Closed;
                 let mut valve2_state = ValveState::Closed;
+                let mut pump_state = PumpState::Off;
 
                 interface.button = sw.is_low();
 
                 match state {
                     State::Idle => {
-                        bldc_pwm.set_duty(0);
-                        bldc_en.set_high();
+                        pump_state = PumpState::Off;
 
                         valve1_state = ValveState::Closed;
                         valve2_state = ValveState::Closed;
@@ -790,8 +790,8 @@ fn main() -> ! {
                         }
                     }
                     State::CoffeeHeating => {
-                        bldc_pwm.set_duty(max_duty * (pump.heat_up_power / 100.0) as u16);
-                        bldc_en.set_low();
+                        pump_state = PumpState::On(max_duty * (pump.heat_up_power / 100.0) as u16);
+
                         pid_data.enable = true;
                         led_state = LedState::SlowSine;
 
@@ -816,8 +816,7 @@ fn main() -> ! {
                         }
                     }
                     State::Ready => {
-                        bldc_pwm.set_duty(0);
-                        bldc_en.set_high();
+                        pump_state = PumpState::Off;
 
                         valve1_state = ValveState::Closed;
                         valve2_state = ValveState::Closed;
@@ -831,8 +830,8 @@ fn main() -> ! {
                         }
                     }
                     State::PreInfuse => {
-                        bldc_pwm.set_duty(max_duty * (pump.pre_infuse_power / 100.0) as u16);
-                        bldc_en.set_low();
+                        pump_state =
+                            PumpState::On(max_duty * (pump.pre_infuse_power / 100.0) as u16);
 
                         valve1_state = ValveState::Closed;
                         valve2_state = ValveState::Closed;
@@ -845,8 +844,8 @@ fn main() -> ! {
                         }
                     }
                     State::Extracting => {
-                        bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
-                        bldc_en.set_low();
+                        pump_state = PumpState::On(max_duty * (pump.extract_power / 100.0) as u16);
+
                         // TODO: we need to set duty cycle to a high value for heating during extraction!
 
                         valve1_state = ValveState::Closed;
@@ -860,8 +859,7 @@ fn main() -> ! {
                         }
                     }
                     State::SteamHeating => {
-                        bldc_pwm.set_duty(0);
-                        bldc_en.set_high();
+                        pump_state = PumpState::Off;
 
                         valve1_state = ValveState::Closed;
                         valve2_state = ValveState::Closed;
@@ -876,8 +874,8 @@ fn main() -> ! {
                         }
                     }
                     State::Steaming => {
-                        bldc_pwm.set_duty(max_duty * (pump.steam_power / 100.0) as u16);
-                        bldc_en.set_low();
+                        pump_state = PumpState::On(max_duty * (pump.steam_power / 100.0) as u16);
+
                         led_state = LedState::FastBlink;
 
                         valve1_state = ValveState::Closed;
@@ -885,6 +883,39 @@ fn main() -> ! {
 
                         // TODO: set exit condition here
                     }
+                }
+
+                match pump_state {
+                    PumpState::Off => match pump_override {
+                        None => {
+                            bldc_pwm.set_duty(0);
+                            bldc_en.set_high();
+                        }
+                        Some(state) => {
+                            if state {
+                                bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
+                                bldc_en.set_high();
+                            } else {
+                                bldc_pwm.set_duty(0);
+                                bldc_en.set_high();
+                            }
+                        }
+                    },
+                    PumpState::On(pwr) => match pump_override {
+                        None => {
+                            bldc_pwm.set_duty(pwr);
+                            bldc_en.set_high();
+                        }
+                        Some(state) => {
+                            if state {
+                                bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
+                                bldc_en.set_high();
+                            } else {
+                                bldc_pwm.set_duty(0);
+                                bldc_en.set_high();
+                            }
+                        }
+                    },
                 }
 
                 match valve1_state {

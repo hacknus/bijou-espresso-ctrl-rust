@@ -124,6 +124,11 @@ impl Default for Interface {
 }
 
 pub enum ValveState {
+    Closed,
     Open,
-    Closed
+}
+
+pub enum PumpState {
+    Off,
+    On(u16),
 }

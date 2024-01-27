@@ -8,7 +8,7 @@ use crate::utils::{Interface, MeasuredData, PidData, PumpData, State};
 
 #[derive(Copy, Clone, Debug)]
 pub enum PumpCommand {
-    Pump(bool),
+    PumpOverride(Option<bool>),
     PumpPower(i16),
     PumpHeatUpPower(i16),
     PumpPreInfusePower(i16),
@@ -258,21 +258,38 @@ pub fn extract_command(
             cmd_ok()
         } else if cmd.contains("[CMD] startPump") {
             pump_command_queue
-                .send(PumpCommand::Pump(true), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(
+                    PumpCommand::PumpOverride(Some(true)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok()
         } else if cmd.contains("[CMD] stopPump") {
             pump_command_queue
-                .send(PumpCommand::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(
+                    PumpCommand::PumpOverride(Some(false)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             cmd_ok()
         } else if cmd.contains("[CMD] stopAll") {
             pump_command_queue
-                .send(PumpCommand::Pump(false), Duration::ms(CMD_QUEUE_TIMEOUT))
+                .send(
+                    PumpCommand::PumpOverride(Some(false)),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
                 .unwrap();
             heater_command_queue
                 .send(
                     HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] clearOverridePump") {
+            pump_command_queue
+                .send(
+                    PumpCommand::PumpOverride(None),
                     Duration::ms(CMD_QUEUE_TIMEOUT),
                 )
                 .unwrap();
