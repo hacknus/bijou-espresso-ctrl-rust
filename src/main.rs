@@ -105,14 +105,14 @@ fn main() -> ! {
     bldc_dir.set_low();
     let water_low = false; // TODO: implement water_low pin
     let mut heater_1 = gpioc.pc6.into_push_pull_output();
-    let mut heater_2 = gpioc.pc7.into_push_pull_output();
+    let _heater_2 = gpioc.pc7.into_push_pull_output();
     let bldc_v = Channel3::new(gpioc.pc8);
     let buzz = Channel4::new(gpioa.pa3);
     let led_dim = Channel4::new(gpiob.pb1);
 
     let enc_pin_a = gpioe.pe11.into_floating_input();
     let mut enc_pin_b = gpioe.pe9.into_floating_input();
-    let enc_pin_sw = gpioe.pe10.into_floating_input();
+    let _enc_pin_sw = gpioe.pe10.into_floating_input();
     let mut syscfg = dp.SYSCFG.constrain();
     enc_pin_b.make_interrupt_source(&mut syscfg);
     enc_pin_b.trigger_on_edge(&mut dp.EXTI, Edge::RisingFalling);
@@ -124,7 +124,7 @@ fn main() -> ! {
     let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize switch
-    let sw = gpiob.pb0.into_floating_input();
+    let _sw = gpiob.pb0.into_floating_input();
 
     // initialize extension pins
     let mut valve1_pin = gpioa.pa15.into_push_pull_output();
@@ -228,7 +228,7 @@ fn main() -> ! {
     let state_container = Arc::new(Mutex::new(state).expect("Failed to create data guard mutex"));
     let state_container_main = state_container.clone();
     let state_container_usb = state_container.clone();
-    let state_container_pid = state_container;
+    let _state_container_pid = state_container;
 
     let temperature_data = MeasuredData::default();
     let temperature_data_container =
@@ -242,7 +242,7 @@ fn main() -> ! {
     let pid_data = PidData::default();
     let pid_data_container =
         Arc::new(Mutex::new(pid_data).expect("Failed to create data guard mutex"));
-    let pid_data_container_display = pid_data_container.clone();
+    let _pid_data_container_display = pid_data_container.clone();
     let pid_data_container_pid = pid_data_container.clone();
     let pid_data_container_main = pid_data_container.clone();
     let pid_data_container_usb = pid_data_container;
@@ -250,14 +250,14 @@ fn main() -> ! {
     let interface = Interface::default();
     let interface_data_container =
         Arc::new(Mutex::new(interface).expect("Failed to create data guard mutex"));
-    let interface_data_container_display = interface_data_container.clone();
+    let _interface_data_container_display = interface_data_container.clone();
     let interface_data_container_main = interface_data_container.clone();
     let interface_data_container_usb = interface_data_container;
 
     let pump = PumpData::default();
     let pump_data_container =
         Arc::new(Mutex::new(pump).expect("Failed to create data guard mutex"));
-    let pump_data_container_display = pump_data_container.clone();
+    let _pump_data_container_display = pump_data_container.clone();
     let pump_data_container_main = pump_data_container.clone();
     let pump_data_container_usb = pump_data_container;
 
