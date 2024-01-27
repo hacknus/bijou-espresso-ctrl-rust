@@ -122,3 +122,8 @@ impl Default for Interface {
         }
     }
 }
+
+pub enum ValveState {
+    Open,
+    Closed
+}

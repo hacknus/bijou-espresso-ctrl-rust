@@ -47,7 +47,7 @@ use crate::devices::max31865::MAX31865;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::pid::PID;
 use crate::usb::{usb_init, usb_println, usb_read};
-use crate::utils::{Interface, LedState, MeasuredData, PidData, PumpData, State};
+use crate::utils::{Interface, LedState, MeasuredData, PidData, PumpData, State, ValveState};
 
 mod commands;
 mod devices;
@@ -708,28 +708,11 @@ fn main() -> ! {
                     match cmd {
                         ValveCommand::Valve1(state) => {
                             valve_1_override = state;
-                            // if let Some(state) = valve_1_override {
-                            //     if state {
-                            //         valve1_pin.set_high()
-                            //     } else {
-                            //         valve1_pin.set_low()
-                            //     }
-                            // }
                         }
                         ValveCommand::Valve2(state) => {
                             valve_2_override = state;
-                            // if let Some(state) = valve_2_override {
-                            //     if state {
-                            //         valve2_pin.set_high()
-                            //     } else {
-                            //         valve2_pin.set_low()
-                            //     }
-                            // }
                         }
                     }
-                } else {
-                    valve_1_override = None;
-                    valve_2_override = None;
                 }
 
                 if let Ok(cmd) = pump_command_queue_main.receive(Duration::ms(5)) {
@@ -780,28 +763,18 @@ fn main() -> ! {
                 }
 
                 // state-machine
+
+                let mut valve1_state = ValveState::Closed;
+                let mut valve2_state = ValveState::Closed;
+
                 match state {
                     State::Idle => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
-                        if let Some(state) = valve_1_override {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
-                            }
-                        } else {
-                            valve1_pin.set_low();
-                        }
-                        if let Some(state) = valve_2_override {
-                            if state {
-                                valve2_pin.set_high()
-                            } else {
-                                valve2_pin.set_low()
-                            }
-                        } else {
-                            valve2_pin.set_low();
-                        }
+
+                        valve1_state = ValveState::Closed;
+                        valve2_state = ValveState::Closed;
+
                         led_state = LedState::Off;
                         pid_data.enable = false;
                         if interface.button && !water_low {
@@ -815,15 +788,10 @@ fn main() -> ! {
                         bldc_en.set_low();
                         pid_data.enable = true;
                         led_state = LedState::SlowSine;
-                        if let Some(state) = valve_1_override {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
-                            }
-                        } else {
-                            valve1_pin.set_high();
-                        }
+
+                        valve1_state = ValveState::Open;
+                        valve2_state = ValveState::Closed;
+
                         if let Some(temperature) = temperature_data.t1 {
                             if interface.coffee_temperature * 0.95 <= temperature
                                 && temperature <= 1.05 * interface.coffee_temperature
@@ -844,24 +812,10 @@ fn main() -> ! {
                     State::Ready => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
-                        if let Some(state) = valve_1_override {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
-                            }
-                        } else {
-                            valve1_pin.set_low();
-                        }
-                        if let Some(state) = valve_2_override {
-                            if state {
-                                valve2_pin.set_high()
-                            } else {
-                                valve2_pin.set_low()
-                            }
-                        } else {
-                            valve2_pin.set_low();
-                        }
+
+                        valve1_state = ValveState::Closed;
+                        valve2_state = ValveState::Closed;
+
                         led_state = LedState::On;
                         if interface.lever_switch {
                             // TODO: check switch pin
@@ -873,24 +827,10 @@ fn main() -> ! {
                     State::PreInfuse => {
                         bldc_pwm.set_duty(max_duty * (pump.pre_infuse_power / 100.0) as u16);
                         bldc_en.set_low();
-                        if let Some(state) = valve_1_override {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
-                            }
-                        } else {
-                            valve1_pin.set_low();
-                        }
-                        if let Some(state) = valve_2_override {
-                            if state {
-                                valve2_pin.set_high()
-                            } else {
-                                valve2_pin.set_low()
-                            }
-                        } else {
-                            valve2_pin.set_low();
-                        }
+
+                        valve1_state = ValveState::Closed;
+                        valve2_state = ValveState::Closed;
+
                         led_state = LedState::SlowBlink;
                         // timer of 5s
                         if timer >= 100 {
@@ -902,26 +842,12 @@ fn main() -> ! {
                         bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
                         bldc_en.set_low();
                         // TODO: we need to set duty cycle to a high value for heating during extraction!
-                        if let Some(state) = valve_1_override {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
-                            }
-                        } else {
-                            valve1_pin.set_low();
-                        }
-                        if let Some(state) = valve_2_override {
-                            if state {
-                                valve2_pin.set_high()
-                            } else {
-                                valve2_pin.set_low()
-                            }
-                        } else {
-                            valve2_pin.set_low();
-                        }
+
+                        valve1_state = ValveState::Closed;
+                        valve2_state = ValveState::Closed;
+
                         led_state = LedState::FastBlink;
-                        valve2_pin.set_high();
+
                         // timeout of 30s
                         if timer >= extraction_time {
                             state = State::Ready;
@@ -930,6 +856,10 @@ fn main() -> ! {
                     State::SteamHeating => {
                         bldc_pwm.set_duty(0);
                         bldc_en.set_high();
+
+                        valve1_state = ValveState::Closed;
+                        valve2_state = ValveState::Closed;
+
                         led_state = LedState::SlowSine;
                         if let Some(temperature) = temperature_data.t2 {
                             if interface.steam_temperature * 0.95 <= temperature
@@ -943,26 +873,58 @@ fn main() -> ! {
                         bldc_pwm.set_duty(max_duty * (pump.steam_power / 100.0) as u16);
                         bldc_en.set_low();
                         led_state = LedState::FastBlink;
-                        if let Some(state) = valve_1_override {
-                            if state {
-                                valve1_pin.set_high()
-                            } else {
-                                valve1_pin.set_low()
-                            }
-                        } else {
-                            valve1_pin.set_low();
-                        }
-                        if let Some(state) = valve_2_override {
-                            if state {
-                                valve2_pin.set_high()
-                            } else {
-                                valve2_pin.set_low()
-                            }
-                        } else {
-                            valve2_pin.set_high();
-                        }
+
+                        valve1_state = ValveState::Closed;
+                        valve2_state = ValveState::Open;
+
                         // TODO: set exit condition here
                     }
+                }
+
+                match valve1_state {
+                    ValveState::Open => match valve_1_override {
+                        None => {
+                            valve1_pin.set_high();
+                        }
+                        Some(state) => {
+                            if !state {
+                                valve1_pin.set_low();
+                            }
+                        }
+                    },
+                    ValveState::Closed => match valve_1_override {
+                        None => {
+                            valve1_pin.set_low();
+                        }
+                        Some(state) => {
+                            if state {
+                                valve1_pin.set_high();
+                            }
+                        }
+                    },
+                }
+
+                match valve2_state {
+                    ValveState::Open => match valve_2_override {
+                        None => {
+                            valve2_pin.set_high();
+                        }
+                        Some(state) => {
+                            if !state {
+                                valve2_pin.set_low();
+                            }
+                        }
+                    },
+                    ValveState::Closed => match valve_2_override {
+                        None => {
+                            valve2_pin.set_low();
+                        }
+                        Some(state) => {
+                            if state {
+                                valve2_pin.set_high();
+                            }
+                        }
+                    },
                 }
 
                 // update timer
