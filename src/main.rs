@@ -124,7 +124,7 @@ fn main() -> ! {
     let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize switch
-    let _sw = gpiob.pb0.into_floating_input();
+    let sw = gpiob.pb0.into_floating_input();
 
     // initialize extension pins
     let mut _pin_a_15 = gpioa.pa15.into_push_pull_output();
@@ -770,6 +770,8 @@ fn main() -> ! {
                 let mut valve1_state = ValveState::Closed;
                 let mut valve2_state = ValveState::Closed;
 
+                interface.button = sw.is_low();
+
                 match state {
                     State::Idle => {
                         bldc_pwm.set_duty(0);
@@ -782,6 +784,7 @@ fn main() -> ! {
                         pid_data.enable = false;
                         if (interface.button || pid_data.enable) && !water_low {
                             // TODO: check button pin
+
                             state = State::CoffeeHeating;
                             interface.button = false;
                         }
