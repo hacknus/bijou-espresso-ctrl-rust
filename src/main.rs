@@ -127,10 +127,13 @@ fn main() -> ! {
     let _sw = gpiob.pb0.into_floating_input();
 
     // initialize extension pins
-    let mut valve1_pin = gpioa.pa15.into_push_pull_output();
+    let mut _pin_a_15 = gpioa.pa15.into_push_pull_output();
     let mut valve2_pin = gpioc.pc10.into_push_pull_output();
-    let mut _pin_c_11 = gpioc.pc11.into_push_pull_output();
+    let mut valve1_pin = gpioc.pc11.into_push_pull_output();
     let mut _pin_c_12 = gpioc.pc12.into_push_pull_output();
+
+    valve1_pin.set_high();
+    valve2_pin.set_high();
 
     // initialize buzzer
     let mut buzz_pwm = dp.TIM2.pwm_hz(buzz, 2000.Hz(), &clocks);
@@ -884,21 +887,21 @@ fn main() -> ! {
                 match valve1_state {
                     ValveState::Open => match valve_1_override {
                         None => {
-                            valve1_pin.set_high();
+                            valve1_pin.set_low();
                         }
                         Some(state) => {
                             if !state {
-                                valve1_pin.set_low();
+                                valve1_pin.set_high();
                             }
                         }
                     },
                     ValveState::Closed => match valve_1_override {
                         None => {
-                            valve1_pin.set_low();
+                            valve1_pin.set_high();
                         }
                         Some(state) => {
                             if state {
-                                valve1_pin.set_high();
+                                valve1_pin.set_low();
                             }
                         }
                     },
@@ -907,21 +910,21 @@ fn main() -> ! {
                 match valve2_state {
                     ValveState::Open => match valve_2_override {
                         None => {
-                            valve2_pin.set_high();
+                            valve2_pin.set_low();
                         }
                         Some(state) => {
                             if !state {
-                                valve2_pin.set_low();
+                                valve2_pin.set_high();
                             }
                         }
                     },
                     ValveState::Closed => match valve_2_override {
                         None => {
-                            valve2_pin.set_low();
+                            valve2_pin.set_high();
                         }
                         Some(state) => {
                             if state {
-                                valve2_pin.set_high();
+                                valve2_pin.set_low();
                             }
                         }
                     },
