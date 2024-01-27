@@ -889,14 +889,17 @@ fn main() -> ! {
                         None => {
                             bldc_pwm.set_duty(0);
                             bldc_en.set_high();
+                            bldc_pwm.disable();
                         }
                         Some(state) => {
                             if state {
                                 bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
                                 bldc_en.set_low();
+                                bldc_pwm.enable();
                             } else {
                                 bldc_pwm.set_duty(0);
                                 bldc_en.set_high();
+                                bldc_pwm.disable();
                             }
                         }
                     },
@@ -904,14 +907,17 @@ fn main() -> ! {
                         None => {
                             bldc_pwm.set_duty(pwr);
                             bldc_en.set_low();
+                            bldc_pwm.enable();
                         }
                         Some(state) => {
                             if state {
                                 bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
                                 bldc_en.set_low();
+                                bldc_pwm.enable();
                             } else {
                                 bldc_pwm.set_duty(0);
                                 bldc_en.set_high();
+                                bldc_pwm.disable();
                             }
                         }
                     },
@@ -1016,23 +1022,28 @@ fn main() -> ! {
                 }
                 match led_state {
                     LedState::Off => {
+                        led_pwm.disable();
                         led_pwm.set_duty(0);
                     }
                     LedState::On => {
+                        led_pwm.enable();
                         led_pwm.set_duty(max_duty);
                     }
                     LedState::SlowSine => {
+                        led_pwm.enable();
                         let val = max_duty
                             - (max_duty as f32 * (count as f32 / 1024.0 * PI).sin()) as u16; // LED1
                         led_pwm.set_duty(val);
                     }
                     LedState::FastBlink => {
+                        led_pwm.enable();
                         led_pwm.set_duty(0);
                         CurrentTask::delay(Duration::ms(250));
                         led_pwm.set_duty(max_duty);
                         CurrentTask::delay(Duration::ms(225));
                     }
                     LedState::SlowBlink => {
+                        led_pwm.enable();
                         led_pwm.set_duty(0);
                         CurrentTask::delay(Duration::ms(500));
                         led_pwm.set_duty(max_duty);
