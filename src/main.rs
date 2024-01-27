@@ -892,6 +892,8 @@ fn main() -> ! {
                         Some(state) => {
                             if !state {
                                 valve1_pin.set_high();
+                            } else {
+                                valve1_pin.set_low();
                             }
                         }
                     },
@@ -902,6 +904,8 @@ fn main() -> ! {
                         Some(state) => {
                             if state {
                                 valve1_pin.set_low();
+                            } else {
+                                valve1_pin.set_high();
                             }
                         }
                     },
@@ -915,6 +919,8 @@ fn main() -> ! {
                         Some(state) => {
                             if !state {
                                 valve2_pin.set_high();
+                            } else {
+                                valve2_pin.set_low();
                             }
                         }
                     },
@@ -925,6 +931,8 @@ fn main() -> ! {
                         Some(state) => {
                             if state {
                                 valve2_pin.set_low();
+                            } else {
+                                valve2_pin.set_high();
                             }
                         }
                     },
