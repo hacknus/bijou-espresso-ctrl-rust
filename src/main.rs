@@ -789,7 +789,8 @@ fn main() -> ! {
                         }
                     }
                     State::CoffeeHeating => {
-                        pump_state = PumpState::On(max_duty * (pump.heat_up_power / 100.0) as u16);
+                        pump_state =
+                            PumpState::On((max_duty as f32 * (pump.heat_up_power / 100.0)) as u16);
 
                         pid_data.enable = true;
                         led_state = LedState::SlowSine;
@@ -829,8 +830,9 @@ fn main() -> ! {
                         }
                     }
                     State::PreInfuse => {
-                        pump_state =
-                            PumpState::On(max_duty * (pump.pre_infuse_power / 100.0) as u16);
+                        pump_state = PumpState::On(
+                            (max_duty as f32 * (pump.pre_infuse_power / 100.0)) as u16,
+                        );
 
                         valve1_state = ValveState::Closed;
                         valve2_state = ValveState::Closed;
@@ -843,7 +845,8 @@ fn main() -> ! {
                         }
                     }
                     State::Extracting => {
-                        pump_state = PumpState::On(max_duty * (pump.extract_power / 100.0) as u16);
+                        pump_state =
+                            PumpState::On((max_duty as f32 * (pump.extract_power / 100.0)) as u16);
 
                         // TODO: we need to set duty cycle to a high value for heating during extraction!
 
@@ -873,7 +876,8 @@ fn main() -> ! {
                         }
                     }
                     State::Steaming => {
-                        pump_state = PumpState::On(max_duty * (pump.steam_power / 100.0) as u16);
+                        pump_state =
+                            PumpState::On((max_duty as f32 * (pump.steam_power / 100.0)) as u16);
 
                         led_state = LedState::FastBlink;
 
@@ -893,7 +897,9 @@ fn main() -> ! {
                         }
                         Some(state) => {
                             if state {
-                                bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
+                                bldc_pwm.set_duty(
+                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
+                                );
                                 bldc_en.set_low();
                                 bldc_pwm.enable();
                             } else {
@@ -911,7 +917,9 @@ fn main() -> ! {
                         }
                         Some(state) => {
                             if state {
-                                bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
+                                bldc_pwm.set_duty(
+                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
+                                );
                                 bldc_en.set_low();
                                 bldc_pwm.enable();
                             } else {
