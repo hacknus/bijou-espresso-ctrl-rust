@@ -235,7 +235,7 @@ pub fn extract_command(
                 )
                 .unwrap();
             cmd_ok()
-        } else if cmd.contains("[CMD] ClearValve1Override") {
+        } else if cmd.contains("[CMD] ClearValve2Override") {
             valve_command_queue
                 .send(ValveCommand::Valve2(None), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
