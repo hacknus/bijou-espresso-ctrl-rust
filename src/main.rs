@@ -780,7 +780,7 @@ fn main() -> ! {
 
                         led_state = LedState::Off;
                         pid_data.enable = false;
-                        if interface.button && !water_low {
+                        if (interface.button || pid_data.enable) && !water_low {
                             // TODO: check button pin
                             state = State::CoffeeHeating;
                             interface.button = false;
