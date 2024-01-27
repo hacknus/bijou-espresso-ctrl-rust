@@ -130,8 +130,8 @@ fn main() -> ! {
 
     // initialize extension pins
     let mut _pin_a_15 = gpioa.pa15.into_push_pull_output();
-    let mut valve2_pin = gpioc.pc10.into_push_pull_output();
-    let mut valve1_pin = gpioc.pc11.into_push_pull_output();
+    let mut valve1_pin = gpioc.pc10.into_push_pull_output();
+    let mut valve2_pin = gpioc.pc11.into_push_pull_output();
     let mut _pin_c_12 = gpioc.pc12.into_push_pull_output();
 
     valve1_pin.set_high();
