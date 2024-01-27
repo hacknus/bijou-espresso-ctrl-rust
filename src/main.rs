@@ -328,7 +328,7 @@ fn main() -> ! {
                 };
 
                 if let Ok(mut temperature_data) =
-                    temperature_data_container_adc.lock(Duration::ms(1))
+                    temperature_data_container_adc.lock(Duration::ms(5))
                 {
                     temperature_data.t1 = t1;
                     temperature_data.t2 = t2;
@@ -357,7 +357,7 @@ fn main() -> ! {
                     break;
                 }
 
-                if let Ok(cmd) = heater_command_queue_pid.receive(Duration::infinite()) {
+                if let Ok(cmd) = heater_command_queue_pid.receive(Duration::ms(5)) {
                     match cmd {
                         HeaterCommand::Temperature(temperature) => pid.target = temperature,
                         HeaterCommand::Heating(enable) => pid.enabled = enable,
@@ -382,7 +382,7 @@ fn main() -> ! {
                     pid.max_val = pid_temp.max_val;
                     pid.target = pid_temp.target;
                     // update current temperature for state machine
-                    if let Ok(data) = temperature_data_container_pid.lock(Duration::ms(1)) {
+                    if let Ok(data) = temperature_data_container_pid.lock(Duration::ms(5)) {
                         current_temperature = data.t1;
                     }
                     pid_temp.current_temperature = current_temperature;
@@ -465,7 +465,7 @@ fn main() -> ! {
                 let mut t5 = None;
 
                 if let Ok(temperature_data) =
-                    temperature_data_container_display.lock(Duration::ms(1))
+                    temperature_data_container_display.lock(Duration::ms(5))
                 {
                     t1 = temperature_data.t1;
                     t2 = temperature_data.t2;
@@ -619,20 +619,20 @@ fn main() -> ! {
 
                 // gather all states
                 if let Ok(temperature_data_temp) =
-                    temperature_data_container_usb.lock(Duration::ms(1))
+                    temperature_data_container_usb.lock(Duration::ms(5))
                 {
                     temperature_data = temperature_data_temp.clone();
                 }
-                if let Ok(pid_data_temp) = pid_data_container_usb.lock(Duration::ms(1)) {
+                if let Ok(pid_data_temp) = pid_data_container_usb.lock(Duration::ms(5)) {
                     pid_data = pid_data_temp.clone();
                 }
-                if let Ok(interface_temp) = interface_data_container_usb.lock(Duration::ms(1)) {
+                if let Ok(interface_temp) = interface_data_container_usb.lock(Duration::ms(5)) {
                     interface = interface_temp.clone();
                 }
-                if let Ok(pump_temp) = pump_data_container_usb.lock(Duration::ms(1)) {
+                if let Ok(pump_temp) = pump_data_container_usb.lock(Duration::ms(5)) {
                     pump = pump_temp.clone();
                 }
-                if let Ok(state_temp) = state_container_usb.lock(Duration::ms(1)) {
+                if let Ok(state_temp) = state_container_usb.lock(Duration::ms(5)) {
                     state = state_temp.clone();
                 }
 
@@ -686,89 +686,92 @@ fn main() -> ! {
 
                 // gather all containers
                 if let Ok(temperature_data_temp) =
-                    temperature_data_container_main.lock(Duration::ms(1))
+                    temperature_data_container_main.lock(Duration::ms(5))
                 {
                     temperature_data = temperature_data_temp.clone();
                 }
-                if let Ok(pid_data_temp) = pid_data_container_main.lock(Duration::ms(1)) {
+                if let Ok(pid_data_temp) = pid_data_container_main.lock(Duration::ms(5)) {
                     pid_data = pid_data_temp.clone();
                 }
-                if let Ok(interface_temp) = interface_data_container_main.lock(Duration::ms(1)) {
+                if let Ok(interface_temp) = interface_data_container_main.lock(Duration::ms(5)) {
                     interface = interface_temp.clone();
                 }
-                if let Ok(pump_temp) = pump_data_container_main.lock(Duration::ms(1)) {
+                if let Ok(pump_temp) = pump_data_container_main.lock(Duration::ms(5)) {
                     pump = pump_temp.clone();
                 }
-                if let Ok(state_temp) = state_container_main.lock(Duration::ms(1)) {
+                if let Ok(state_temp) = state_container_main.lock(Duration::ms(5)) {
                     state = state_temp.clone();
                 }
 
                 // TODO: this needs to override the state machine!
-                if let Ok(cmd) = valve_command_queue_main.receive(Duration::infinite()) {
+                if let Ok(cmd) = valve_command_queue_main.receive(Duration::ms(5)) {
                     match cmd {
                         ValveCommand::Valve1(state) => {
                             valve_1_override = state;
-                            if let Some(state) = valve_1_override {
-                                if state {
-                                    valve1_pin.set_high()
-                                } else {
-                                    valve1_pin.set_low()
-                                }
-                            }
+                            // if let Some(state) = valve_1_override {
+                            //     if state {
+                            //         valve1_pin.set_high()
+                            //     } else {
+                            //         valve1_pin.set_low()
+                            //     }
+                            // }
                         }
                         ValveCommand::Valve2(state) => {
                             valve_2_override = state;
-                            if let Some(state) = valve_2_override {
-                                if state {
-                                    valve2_pin.set_high()
-                                } else {
-                                    valve2_pin.set_low()
-                                }
-                            }
+                            // if let Some(state) = valve_2_override {
+                            //     if state {
+                            //         valve2_pin.set_high()
+                            //     } else {
+                            //         valve2_pin.set_low()
+                            //     }
+                            // }
                         }
                     }
+                } else {
+                    valve_1_override = None;
+                    valve_2_override = None;
                 }
 
-                if let Ok(cmd) = pump_command_queue_main.receive(Duration::infinite()) {
+                if let Ok(cmd) = pump_command_queue_main.receive(Duration::ms(5)) {
                     match cmd {
                         PumpCommand::Pump(state) => {
                             if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(1))
+                                pump_data_container_main.lock(Duration::ms(5))
                             {
                                 pump_temp.enable = state;
                             }
                         }
                         PumpCommand::PumpPower(pwr) => {
                             if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(1))
+                                pump_data_container_main.lock(Duration::ms(5))
                             {
                                 pump_temp.extract_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpHeatUpPower(pwr) => {
                             if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(1))
+                                pump_data_container_main.lock(Duration::ms(5))
                             {
                                 pump_temp.heat_up_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpPreInfusePower(pwr) => {
                             if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(1))
+                                pump_data_container_main.lock(Duration::ms(5))
                             {
                                 pump_temp.pre_infuse_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpCoffeePower(pwr) => {
                             if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(1))
+                                pump_data_container_main.lock(Duration::ms(5))
                             {
                                 pump_temp.extract_power = pwr as f32;
                             }
                         }
                         PumpCommand::PumpSteamPower(pwr) => {
                             if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(1))
+                                pump_data_container_main.lock(Duration::ms(5))
                             {
                                 pump_temp.steam_power = pwr as f32;
                             }
@@ -969,16 +972,16 @@ fn main() -> ! {
                 }
 
                 // send states
-                if let Ok(mut pid_data_temp) = pid_data_container_main.lock(Duration::ms(1)) {
+                if let Ok(mut pid_data_temp) = pid_data_container_main.lock(Duration::ms(5)) {
                     pid_data_temp.enable = pid_data.enable;
                 }
-                if let Ok(mut led_state_temp) = led_state_container_main.lock(Duration::ms(1)) {
+                if let Ok(mut led_state_temp) = led_state_container_main.lock(Duration::ms(5)) {
                     *led_state_temp = led_state.clone();
                 }
-                if let Ok(mut state_temp) = state_container_main.lock(Duration::ms(1)) {
+                if let Ok(mut state_temp) = state_container_main.lock(Duration::ms(5)) {
                     *state_temp = state.clone();
                 }
-                if let Ok(mut interface_temp) = interface_data_container_main.lock(Duration::ms(1))
+                if let Ok(mut interface_temp) = interface_data_container_main.lock(Duration::ms(5))
                 {
                     interface_temp.button = interface.button;
                     interface_temp.lever_switch = interface.lever_switch;
@@ -1002,7 +1005,7 @@ fn main() -> ! {
                     break;
                 }
 
-                if let Ok(led_state_temp) = led_state_container_led.lock(Duration::ms(1)) {
+                if let Ok(led_state_temp) = led_state_container_led.lock(Duration::ms(5)) {
                     led_state = led_state_temp.clone();
                 }
                 match led_state {
