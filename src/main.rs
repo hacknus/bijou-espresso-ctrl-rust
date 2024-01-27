@@ -710,7 +710,6 @@ fn main() -> ! {
                     state = state_temp.clone();
                 }
 
-                // TODO: this needs to override the state machine!
                 if let Ok(cmd) = valve_command_queue_main.receive(Duration::ms(5)) {
                     match cmd {
                         ValveCommand::Valve1(state) => {
@@ -894,7 +893,7 @@ fn main() -> ! {
                         Some(state) => {
                             if state {
                                 bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
-                                bldc_en.set_high();
+                                bldc_en.set_low();
                             } else {
                                 bldc_pwm.set_duty(0);
                                 bldc_en.set_high();
@@ -904,12 +903,12 @@ fn main() -> ! {
                     PumpState::On(pwr) => match pump_override {
                         None => {
                             bldc_pwm.set_duty(pwr);
-                            bldc_en.set_high();
+                            bldc_en.set_low();
                         }
                         Some(state) => {
                             if state {
                                 bldc_pwm.set_duty(max_duty * (pump.extract_power / 100.0) as u16);
-                                bldc_en.set_high();
+                                bldc_en.set_low();
                             } else {
                                 bldc_pwm.set_duty(0);
                                 bldc_en.set_high();
