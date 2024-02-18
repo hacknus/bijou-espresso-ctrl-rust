@@ -798,7 +798,7 @@ fn main() -> ! {
                         valve2_state = ValveState::Closed;
 
                         if let Some(temperature) = temperature_data.t3 {
-                            if interface.brew_head_temperature * 0.8 <= temperature {
+                            if interface.brew_head_temperature * 0.95 <= temperature {
                                 state = State::Ready;
                             }
                         }
@@ -815,7 +815,7 @@ fn main() -> ! {
                             timer = 0;
                         }
                         if let Some(temperature) = temperature_data.t3 {
-                            if interface.brew_head_temperature * 0.8 > temperature {
+                            if interface.brew_head_temperature * 0.95 > temperature {
                                 state = State::CoffeeHeating;
                             }
                         }
