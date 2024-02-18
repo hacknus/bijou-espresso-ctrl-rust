@@ -21,7 +21,7 @@ pub struct PumpData {
 impl Default for PumpData {
     fn default() -> Self {
         PumpData {
-            heat_up_power: 22.0,
+            heat_up_power: 30.0,
             pre_infuse_power: 30.0,
             steam_power: 10.0,
             extract_power: 100.0,
@@ -97,6 +97,7 @@ pub enum LedState {
 #[derive(Clone)]
 pub struct Interface {
     pub coffee_temperature: f32,
+    pub brew_head_temperature: f32,
     pub steam_temperature: f32,
     pub trigger_extraction: bool,
     pub lever_switch: bool,
@@ -111,6 +112,7 @@ impl Default for Interface {
     fn default() -> Self {
         Interface {
             coffee_temperature: 92.0,
+            brew_head_temperature: 70.0,
             steam_temperature: 120.0,
             trigger_extraction: false,
             lever_switch: false,

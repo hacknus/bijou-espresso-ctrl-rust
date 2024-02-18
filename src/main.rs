@@ -797,10 +797,8 @@ fn main() -> ! {
                         valve1_state = ValveState::Open;
                         valve2_state = ValveState::Closed;
 
-                        if let Some(temperature) = temperature_data.t1 {
-                            if interface.coffee_temperature * 0.95 <= temperature
-                                && temperature <= 1.05 * interface.coffee_temperature
-                            {
+                        if let Some(temperature) = temperature_data.t3 {
+                            if interface.brew_head_temperature * 0.8 <= temperature {
                                 state = State::Ready;
                             }
                         }
@@ -815,6 +813,11 @@ fn main() -> ! {
                         if interface.lever_switch {
                             state = State::PreInfuse;
                             timer = 0;
+                        }
+                        if let Some(temperature) = temperature_data.t3 {
+                            if interface.brew_head_temperature * 0.8 > temperature {
+                                state = State::CoffeeHeating;
+                            }
                         }
                     }
                     State::PreInfuse => {
