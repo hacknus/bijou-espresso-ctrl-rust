@@ -690,6 +690,7 @@ fn main() -> ! {
             let mut previous_kp = pid_data.kp;
             let mut previous_ki = pid_data.ki;
             let mut previous_kd = pid_data.kd;
+            let mut previous_target = pid_data.target;
 
             loop {
                 if check_shutdown() {
@@ -821,8 +822,10 @@ fn main() -> ! {
                                 previous_kp = pid_data_temp.kp;
                                 previous_ki = pid_data_temp.ki;
                                 previous_kd = pid_data_temp.kd;
+                                previous_target = pid_data_temp.target;
                                 // increase p value for extraction!
                                 pid_data_temp.kp *= 2.0;
+                                pid_data_temp.target += 2.0;
                             }
                             state = State::PreInfuse;
                             timer = 0;
@@ -867,6 +870,7 @@ fn main() -> ! {
                                 pid_data_temp.kp = previous_kp;
                                 pid_data_temp.ki = previous_ki;
                                 pid_data_temp.kd = previous_kd;
+                                pid_data_temp.target = previous_target;
                             }
                             state = State::Ready;
                         }
