@@ -687,6 +687,10 @@ fn main() -> ! {
 
             let mut pump_override = None;
 
+            let mut previous_kp = pid_data.kp;
+            let mut previous_ki = pid_data.ki;
+            let mut previous_kd = pid_data.kd;
+
             loop {
                 if check_shutdown() {
                     break;
@@ -811,6 +815,15 @@ fn main() -> ! {
 
                         led_state = LedState::On;
                         if interface.lever_switch {
+                            if let Ok(mut pid_data_temp) =
+                                pid_data_container_main.lock(Duration::ms(5))
+                            {
+                                previous_kp = pid_data_temp.kp;
+                                previous_ki = pid_data_temp.ki;
+                                previous_kd = pid_data_temp.kd;
+                                // increase p value for extraction!
+                                pid_data_temp.kp *= 2.0;
+                            }
                             state = State::PreInfuse;
                             timer = 0;
                         }
@@ -848,6 +861,13 @@ fn main() -> ! {
 
                         // timeout of 30s
                         if timer >= extraction_time || lever.is_high() {
+                            if let Ok(mut pid_data_temp) =
+                                pid_data_container_main.lock(Duration::ms(5))
+                            {
+                                pid_data_temp.kp = previous_kp;
+                                pid_data_temp.ki = previous_ki;
+                                pid_data_temp.kd = previous_kd;
+                            }
                             state = State::Ready;
                         }
                     }
@@ -1039,18 +1059,18 @@ fn main() -> ! {
                         led_pwm.set_duty(0);
                         CurrentTask::delay(Duration::ms(250));
                         led_pwm.set_duty(max_duty);
-                        CurrentTask::delay(Duration::ms(225));
+                        CurrentTask::delay(Duration::ms(240));
                     }
                     LedState::SlowBlink => {
                         led_pwm.enable();
                         led_pwm.set_duty(0);
                         CurrentTask::delay(Duration::ms(500));
                         led_pwm.set_duty(max_duty);
-                        CurrentTask::delay(Duration::ms(475));
+                        CurrentTask::delay(Duration::ms(490));
                     }
                 }
                 count += 10;
-                CurrentTask::delay(Duration::ms(25));
+                CurrentTask::delay(Duration::ms(10));
             }
         })
         .unwrap();
