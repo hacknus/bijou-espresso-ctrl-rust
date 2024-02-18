@@ -21,7 +21,7 @@ pub struct PumpData {
 impl Default for PumpData {
     fn default() -> Self {
         PumpData {
-            heat_up_power: 10.0,
+            heat_up_power: 22.0,
             pre_infuse_power: 30.0,
             steam_power: 10.0,
             extract_power: 100.0,
@@ -62,7 +62,7 @@ impl Default for PidData {
             d: 0.0,
             kp: 1.0,
             ki: 0.0,
-            kd: 1.0,
+            kd: 3.0,
             window_size: 500,
             max_val: 0.0,
             osr: 1,

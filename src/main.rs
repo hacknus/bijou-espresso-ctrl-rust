@@ -388,7 +388,7 @@ fn main() -> ! {
                     pid.target = pid_temp.target;
                     // update current temperature for state machine
                     if let Ok(data) = temperature_data_container_pid.lock(Duration::ms(5)) {
-                        current_temperature = data.t1;
+                        current_temperature = data.t2;
                     }
                     pid_temp.current_temperature = current_temperature;
                     // check if i has been reset

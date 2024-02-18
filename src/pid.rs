@@ -25,7 +25,7 @@ impl PID {
             d: 0.0,
             kp: 1.0,
             ki: 0.0,
-            kd: 1.0,
+            kd: 3.0,
             val: 0.0,
             duty_cycle: 0,
             error: 0.0,
