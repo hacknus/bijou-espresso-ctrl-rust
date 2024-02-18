@@ -798,7 +798,7 @@ fn main() -> ! {
                         valve2_state = ValveState::Closed;
 
                         if let Some(temperature) = temperature_data.t3 {
-                            if interface.brew_head_temperature * 0.95 <= temperature {
+                            if interface.brew_head_temperature <= temperature {
                                 state = State::Ready;
                             }
                         }
@@ -847,7 +847,7 @@ fn main() -> ! {
                         led_state = LedState::FastBlink;
 
                         // timeout of 30s
-                        if timer >= extraction_time {
+                        if timer >= extraction_time || lever.is_high() {
                             state = State::Ready;
                         }
                     }
