@@ -108,6 +108,7 @@ fn main() -> ! {
     let water_low = false; // TODO: implement water_low pin
     let mut heater_1 = gpioc.pc6.into_push_pull_output();
     let _heater_2 = gpioc.pc7.into_push_pull_output();
+    let lever = gpioe.pe7.into_floating_input();
     let bldc_v = Channel3::new(gpioc.pc8);
     let buzz = Channel4::new(gpioa.pa3);
     let led_dim = Channel4::new(gpiob.pb1);
@@ -125,14 +126,14 @@ fn main() -> ! {
     let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
     let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
-    // initialize switch
-    let sw = gpiob.pb0.into_floating_input();
+    // initialize button
+    let button = gpiob.pb0.into_floating_input();
 
     // initialize extension pins
-    let mut _pin_a_15 = gpioa.pa15.into_push_pull_output();
+    let _pin_a_15 = gpioa.pa15.into_push_pull_output();
     let mut valve1_pin = gpioc.pc10.into_push_pull_output();
     let mut valve2_pin = gpioc.pc11.into_push_pull_output();
-    let mut _pin_c_12 = gpioc.pc12.into_push_pull_output();
+    let _pin_c_12 = gpioc.pc12.into_push_pull_output();
 
     valve1_pin.set_high();
     valve2_pin.set_high();
@@ -770,7 +771,8 @@ fn main() -> ! {
                 let mut valve2_state = ValveState::Closed;
                 let mut pump_state = PumpState::Off;
 
-                interface.button = sw.is_low();
+                interface.button = button.is_low();
+                interface.lever_switch = lever.is_low();
 
                 match state {
                     State::Idle => {
@@ -782,10 +784,7 @@ fn main() -> ! {
                         led_state = LedState::Off;
                         pid_data.enable = false;
                         if (interface.button || pid_data.enable) && !water_low {
-                            // TODO: check button pin
-
                             state = State::CoffeeHeating;
-                            interface.button = false;
                         }
                     }
                     State::CoffeeHeating => {
@@ -802,15 +801,6 @@ fn main() -> ! {
                             if interface.coffee_temperature * 0.95 <= temperature
                                 && temperature <= 1.05 * interface.coffee_temperature
                             {
-                                if let Some(state) = valve_1_override {
-                                    if state {
-                                        valve1_pin.set_high()
-                                    } else {
-                                        valve1_pin.set_low()
-                                    }
-                                } else {
-                                    valve1_pin.set_low();
-                                }
                                 state = State::Ready;
                             }
                         }
@@ -823,9 +813,7 @@ fn main() -> ! {
 
                         led_state = LedState::On;
                         if interface.lever_switch {
-                            // TODO: check switch pin
                             state = State::PreInfuse;
-                            interface.lever_switch = false;
                             timer = 0;
                         }
                     }
