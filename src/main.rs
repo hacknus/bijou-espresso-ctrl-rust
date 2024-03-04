@@ -26,6 +26,10 @@ use embedded_graphics::{
 use freertos_rust::*;
 use micromath::F32Ext;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+use stm32f4xx_hal::adc::config::{AdcConfig, Dma, SampleTime, Scan, Sequence};
+use stm32f4xx_hal::adc::{Adc, Temperature};
+use stm32f4xx_hal::dma::config::DmaConfig;
+use stm32f4xx_hal::dma::{StreamsTuple, Transfer};
 use stm32f4xx_hal::{
     gpio::Edge,
     i2c::Mode as i2cMode,
@@ -44,6 +48,7 @@ use crate::commands::{
 use crate::devices::led::LED;
 use crate::devices::max31865::Wires;
 use crate::devices::max31865::MAX31865;
+use crate::devices::pressure_sense::{read_pressure, ADC_MEMORY, G_XFR};
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::pid::PID;
 use crate::usb::{usb_init, usb_println, usb_read};
@@ -95,6 +100,9 @@ fn main() -> ! {
     let gpioc = dp.GPIOC.split();
     let gpiod = dp.GPIOD.split();
     let gpioe = dp.GPIOE.split();
+
+    // initialize DMA
+    let dma2 = StreamsTuple::new(dp.DMA2);
 
     // initialize pins
     let cs_5 = gpiod.pd14.into_push_pull_output();
@@ -224,6 +232,35 @@ fn main() -> ! {
 
     let spi_bus = shared_bus::BusManagerSimple::new(spi);
 
+    // init adc
+    let pressure_sense_pin = gpioc.pc0.into_analog();
+
+    let dma_config = DmaConfig::default()
+        .transfer_complete_interrupt(true)
+        .memory_increment(true)
+        .double_buffer(false);
+
+    let adc_config = AdcConfig::default()
+        .dma(Dma::Continuous)
+        .scan(Scan::Enabled);
+    let mut adc = Adc::adc1(dp.ADC1, true, adc_config);
+
+    adc.configure_channel(&Temperature, Sequence::One, SampleTime::Cycles_480);
+    adc.configure_channel(&pressure_sense_pin, Sequence::Two, SampleTime::Cycles_480);
+    adc.enable_temperature_and_vref();
+
+    // let adc_buffer = cortex_m::singleton!(: [u16; 2] = [0; 2]).unwrap();
+    let mut transfer = unsafe {
+        Transfer::init_peripheral_to_memory(dma2.0, adc, &mut ADC_MEMORY, None, dma_config)
+    };
+
+    transfer.start(|adc| {
+        adc.start_conversion();
+    });
+    cortex_m::interrupt::free(|cs| {
+        G_XFR.borrow(cs).replace(Some(transfer));
+    });
+
     let led_state = LedState::Off;
     let led_state_container =
         Arc::new(Mutex::new(led_state).expect("Failed to create data guard mutex"));
@@ -236,14 +273,14 @@ fn main() -> ! {
     let state_container_usb = state_container.clone();
     let _state_container_pid = state_container;
 
-    let temperature_data = MeasuredData::default();
-    let temperature_data_container =
-        Arc::new(Mutex::new(temperature_data).expect("Failed to create data guard mutex"));
-    let temperature_data_container_display = temperature_data_container.clone();
-    let temperature_data_container_adc = temperature_data_container.clone();
-    let temperature_data_container_main = temperature_data_container.clone();
-    let temperature_data_container_pid = temperature_data_container.clone();
-    let temperature_data_container_usb = temperature_data_container;
+    let measured_data = MeasuredData::default();
+    let measured_data_container =
+        Arc::new(Mutex::new(measured_data).expect("Failed to create data guard mutex"));
+    let measured_data_container_display = measured_data_container.clone();
+    let measured_data_container_adc = measured_data_container.clone();
+    let measured_data_container_main = measured_data_container.clone();
+    let measured_data_container_pid = measured_data_container.clone();
+    let measured_data_container_usb = measured_data_container;
 
     let pid_data = PidData::default();
     let pid_data_container =
@@ -307,6 +344,8 @@ fn main() -> ! {
                     break;
                 }
 
+                let pressure = read_pressure();
+
                 let t1 = if max31865_1_state.is_ok() {
                     max31865_1.get_temperature()
                 } else {
@@ -333,14 +372,13 @@ fn main() -> ! {
                     None
                 };
 
-                if let Ok(mut temperature_data) =
-                    temperature_data_container_adc.lock(Duration::ms(5))
-                {
-                    temperature_data.t1 = t1;
-                    temperature_data.t2 = t2;
-                    temperature_data.t3 = t3;
-                    temperature_data.t4 = t4;
-                    temperature_data.t5 = t5;
+                if let Ok(mut measured_data) = measured_data_container_adc.lock(Duration::ms(5)) {
+                    measured_data.t1 = t1;
+                    measured_data.t2 = t2;
+                    measured_data.t3 = t3;
+                    measured_data.t4 = t4;
+                    measured_data.t5 = t5;
+                    measured_data.p = pressure;
                 }
                 CurrentTask::delay(Duration::ms(100));
             }
@@ -388,7 +426,7 @@ fn main() -> ! {
                     pid.max_val = pid_temp.max_val;
                     pid.target = pid_temp.target;
                     // update current temperature for state machine
-                    if let Ok(data) = temperature_data_container_pid.lock(Duration::ms(5)) {
+                    if let Ok(data) = measured_data_container_pid.lock(Duration::ms(5)) {
                         current_temperature = data.t2;
                     }
                     pid_temp.current_temperature = current_temperature;
@@ -470,8 +508,7 @@ fn main() -> ! {
                 let mut t4 = None;
                 let mut t5 = None;
 
-                if let Ok(temperature_data) =
-                    temperature_data_container_display.lock(Duration::ms(5))
+                if let Ok(temperature_data) = measured_data_container_display.lock(Duration::ms(5))
                 {
                     t1 = temperature_data.t1;
                     t2 = temperature_data.t2;
@@ -624,8 +661,7 @@ fn main() -> ! {
                 }
 
                 // gather all states
-                if let Ok(temperature_data_temp) =
-                    temperature_data_container_usb.lock(Duration::ms(5))
+                if let Ok(temperature_data_temp) = measured_data_container_usb.lock(Duration::ms(5))
                 {
                     temperature_data = temperature_data_temp.clone();
                 }
@@ -699,7 +735,7 @@ fn main() -> ! {
 
                 // gather all containers
                 if let Ok(temperature_data_temp) =
-                    temperature_data_container_main.lock(Duration::ms(5))
+                    measured_data_container_main.lock(Duration::ms(5))
                 {
                     temperature_data = temperature_data_temp.clone();
                 }
