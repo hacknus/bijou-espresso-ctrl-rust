@@ -371,6 +371,6 @@ pub fn send_housekeeping(
         temperatures.t5.unwrap_or(0.0),
     );
     usb_println(hk.as_str());
-    let hk = arrform!(128, "[P] {:.2}", temperatures.p.unwrap_or(0.0),);
+    let hk = arrform!(128, "[P] {:.2}", temperatures.p.unwrap_or(0.0));
     usb_println(hk.as_str());
 }

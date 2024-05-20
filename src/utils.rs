@@ -22,7 +22,7 @@ impl Default for PumpData {
     fn default() -> Self {
         PumpData {
             heat_up_power: 18.0,
-            pre_infuse_power: 18.0,
+            pre_infuse_power: 15.0,
             steam_power: 10.0,
             extract_power: 80.0,
             extraction_timeout: 20000.0,

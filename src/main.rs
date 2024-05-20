@@ -882,7 +882,7 @@ fn main() -> ! {
 
                         led_state = LedState::SlowBlink;
                         // timer of 5s
-                        if timer >= 100 {
+                        if timer >= 10 {
                             state = State::Extracting;
                             timer = 0;
                         }
