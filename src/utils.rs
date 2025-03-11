@@ -48,7 +48,7 @@ pub struct PidData {
     pub enable: bool,
     pub reset_i: bool,
     pub pid_val: f32,
-    pub duty_cycle: u32,
+    pub duty_cycle: f32,
 }
 
 impl Default for PidData {
@@ -69,7 +69,7 @@ impl Default for PidData {
             enable: false,
             reset_i: false,
             pid_val: 0.0,
-            duty_cycle: 0,
+            duty_cycle: 0.0,
         }
     }
 }

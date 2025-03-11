@@ -7,7 +7,7 @@ pub struct PID {
     pub ki: f32,
     pub kd: f32,
     pub val: f32,
-    pub duty_cycle: u32,
+    pub duty_cycle: f32,
     error: f32,
     prev_time: u32,
     pub target: f32,
@@ -27,7 +27,7 @@ impl PID {
             ki: 0.0,
             kd: 2.0,
             val: 0.0,
-            duty_cycle: 0,
+            duty_cycle: 0.0,
             error: 0.0,
             prev_time: 0,
             target: 95.0,
@@ -47,9 +47,14 @@ impl PID {
         self.val
     }
 
-    pub fn get_heat_value(&mut self, temperature: f32, now: u32) -> u32 {
+    pub fn get_heat_value(&mut self, temperature: f32, now: u32) -> f32 {
         let pid_val = self.calculate(temperature, now);
-        self.duty_cycle = (pid_val * self.window_size as f32) as u32;
+        if pid_val < 0.0 {
+            self.duty_cycle = 0.0;
+        } else {
+            self.duty_cycle = pid_val;
+        }
+        // self.duty_cycle = self.target;
         self.duty_cycle
     }
 }

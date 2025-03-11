@@ -30,6 +30,7 @@ use stm32f4xx_hal::adc::config::{AdcConfig, Dma, SampleTime, Scan, Sequence};
 use stm32f4xx_hal::adc::{Adc, Temperature};
 use stm32f4xx_hal::dma::config::DmaConfig;
 use stm32f4xx_hal::dma::{StreamsTuple, Transfer};
+use stm32f4xx_hal::timer::{Channel1, Channel2};
 use stm32f4xx_hal::{
     gpio::Edge,
     i2c::Mode as i2cMode,
@@ -88,7 +89,8 @@ fn main() -> ! {
         .pclk2(24.MHz())
         .freeze();
 
-    let mut tick_timer = dp.TIM5.counter_ms(&clocks);
+    // TODO check if TIM4 actually works, before it was TIM5
+    let mut tick_timer = dp.TIM4.counter_ms(&clocks);
     tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
 
     let mut delay = dp.TIM1.delay_us(&clocks);
@@ -114,8 +116,10 @@ fn main() -> ! {
     let mut bldc_dir = gpioc.pc9.into_push_pull_output();
     bldc_dir.set_low();
     let water_low = false; // TODO: implement water_low pin
-    let mut heater_1 = gpioc.pc6.into_push_pull_output();
-    let _heater_2 = gpioc.pc7.into_push_pull_output();
+    let heater_1 = Channel1::new(gpioc.pc6);
+    let heater_2 = Channel2::new(gpioc.pc7);
+    let heater_bg = Channel3::new(gpioa.pa2);
+
     let lever = gpioe.pe7.into_floating_input();
     let bldc_v = Channel3::new(gpioc.pc8);
     let buzz = Channel4::new(gpioa.pa3);
@@ -164,6 +168,20 @@ fn main() -> ! {
     // initialize bldc pwm
     let max_duty = bldc_pwm.get_max_duty();
     bldc_pwm.set_duty(max_duty / 2);
+
+    // initialize heater 1 pwm
+
+    // initialize heater 2 pwm
+    let (mut heater_1_pwm, mut heater_2_pwm) = dp
+        .TIM8
+        .pwm_hz((heater_1, heater_2), 3.Hz(), &clocks)
+        .split();
+    heater_1_pwm.set_duty(0);
+    heater_2_pwm.set_duty(0);
+
+    // initialize heater bg pwm
+    let mut heater_bg_pwm = dp.TIM5.pwm_hz(heater_bg, 3.Hz(), &clocks);
+    heater_bg_pwm.set_duty(Channel::C3, 0);
 
     // initialize usb
     let usb = USB {
@@ -279,16 +297,34 @@ fn main() -> ! {
     let measured_data_container_display = measured_data_container.clone();
     let measured_data_container_adc = measured_data_container.clone();
     let measured_data_container_main = measured_data_container.clone();
-    let measured_data_container_pid = measured_data_container.clone();
+    let measured_data_container_pid_1 = measured_data_container.clone();
+    let measured_data_container_pid_2 = measured_data_container.clone();
+    let measured_data_container_pid_bg = measured_data_container.clone();
     let measured_data_container_usb = measured_data_container;
 
-    let pid_data = PidData::default();
-    let pid_data_container =
-        Arc::new(Mutex::new(pid_data).expect("Failed to create data guard mutex"));
-    let _pid_data_container_display = pid_data_container.clone();
-    let pid_data_container_pid = pid_data_container.clone();
-    let pid_data_container_main = pid_data_container.clone();
-    let pid_data_container_usb = pid_data_container;
+    let pid_data_1 = PidData::default();
+    let pid_data_1_container =
+        Arc::new(Mutex::new(pid_data_1).expect("Failed to create data guard mutex"));
+    let _pid_data_1_container_display = pid_data_1_container.clone();
+    let pid_1_data_container_pid_1 = pid_data_1_container.clone();
+    let pid_1_data_container_main = pid_data_1_container.clone();
+    let pid_1_data_container_usb = pid_data_1_container;
+
+    let pid_data_2 = PidData::default();
+    let pid_data_2_container =
+        Arc::new(Mutex::new(pid_data_2).expect("Failed to create data guard mutex"));
+    let _pid_data_2_container_display = pid_data_2_container.clone();
+    let pid_2_data_container_pid_2 = pid_data_2_container.clone();
+    let pid_2_data_container_main = pid_data_2_container.clone();
+    let pid_2_data_container_usb = pid_data_2_container;
+
+    let pid_data_bg = PidData::default();
+    let pid_data_bg_container =
+        Arc::new(Mutex::new(pid_data_bg).expect("Failed to create data guard mutex"));
+    let _pid_data_bg_container_display = pid_data_bg_container.clone();
+    let pid_bg_data_container_pid_bg = pid_data_bg_container.clone();
+    let pid_bg_data_container_main = pid_data_bg_container.clone();
+    let pid_bg_data_container_usb = pid_data_bg_container;
 
     let interface = Interface::default();
     let interface_data_container =
@@ -308,9 +344,17 @@ fn main() -> ! {
     let pump_command_queue_main = pump_command_queue.clone();
     let pump_command_queue_usb = pump_command_queue;
 
-    let heater_command_queue = Arc::new(Queue::new(10).unwrap());
-    let heater_command_queue_pid = heater_command_queue.clone();
-    let heater_command_queue_usb = heater_command_queue;
+    let heater_1_command_queue = Arc::new(Queue::new(10).unwrap());
+    let heater_1_command_queue_pid_1 = heater_1_command_queue.clone();
+    let heater_1_command_queue_usb = heater_1_command_queue;
+
+    let heater_2_command_queue = Arc::new(Queue::new(10).unwrap());
+    let heater_2_command_queue_pid_2 = heater_2_command_queue.clone();
+    let heater_2_command_queue_usb = heater_2_command_queue;
+
+    let brew_head_command_queue = Arc::new(Queue::new(10).unwrap());
+    let brew_head_command_queue_pid_bg = brew_head_command_queue.clone();
+    let brew_head_command_queue_usb = brew_head_command_queue;
 
     let valve_command_queue = Arc::new(Queue::new(10).unwrap());
     let valve_command_queue_main = valve_command_queue.clone();
@@ -386,96 +430,233 @@ fn main() -> ! {
         .unwrap();
 
     Task::new()
+        // TODO combine all PIDs in one task
         .name("PID TASK")
         .stack_size(512)
         .priority(TaskPriority(1))
         .start(move || {
-            let mut pid = PID::new();
-            let mut current_temperature = None;
-            let mut boiler_override = None;
+            let mut heater_1_pid = PID::new();
+            let mut heater_1_current_temperature = None;
+            let mut heater_1_boiler_override = None;
+            let mut heater_2_pid = PID::new();
+            let mut heater_2_current_temperature = None;
+            let mut heater_2_boiler_override = None;
+            let mut bg_pid = PID::new();
+            let mut bg_current_temperature = None;
+            let mut bg_boiler_override = None;
 
             loop {
                 if check_shutdown() {
-                    heater_1.set_low();
+                    heater_1_pwm.disable();
+                    heater_1_pwm.set_duty(0);
                     fault_2_led.off();
                     break;
                 }
 
-                if let Ok(cmd) = heater_command_queue_pid.receive(Duration::ms(5)) {
+                if let Ok(cmd) = heater_1_command_queue_pid_1.receive(Duration::ms(5)) {
                     match cmd {
-                        HeaterCommand::Temperature(temperature) => pid.target = temperature,
-                        HeaterCommand::Heating(enable) => pid.enabled = enable,
-                        HeaterCommand::WindowSize(window_size) => {
-                            pid.window_size = window_size as u32;
+                        HeaterCommand::Temperature(temperature) => {
+                            heater_1_pid.target = temperature
                         }
-                        HeaterCommand::PidP(kp) => pid.kp = kp,
-                        HeaterCommand::PidI(ki) => pid.ki = ki,
-                        HeaterCommand::PidD(kd) => pid.kd = kd,
-                        HeaterCommand::PidMaxVal(max_val) => pid.max_val = max_val,
-                        HeaterCommand::Boiler1(boiler_1) => boiler_override = boiler_1,
+                        HeaterCommand::Heating(enable) => heater_1_pid.enabled = enable,
+                        HeaterCommand::WindowSize(window_size) => {
+                            heater_1_pid.window_size = window_size as u32;
+                        }
+                        HeaterCommand::PidP(kp) => heater_1_pid.kp = kp,
+                        HeaterCommand::PidI(ki) => heater_1_pid.ki = ki,
+                        HeaterCommand::PidD(kd) => heater_1_pid.kd = kd,
+                        HeaterCommand::PidMaxVal(max_val) => heater_1_pid.max_val = max_val,
+                        HeaterCommand::Boiler1(boiler_1) => heater_1_boiler_override = boiler_1,
                     }
                 }
 
-                if let Ok(mut pid_temp) = pid_data_container_pid.lock(Duration::ms(10)) {
+                if let Ok(mut pid_temp) = pid_1_data_container_pid_1.lock(Duration::ms(10)) {
                     // get values
-                    pid.enabled = pid_temp.enable;
-                    pid.kp = pid_temp.kp;
-                    pid.ki = pid_temp.ki;
-                    pid.kd = pid_temp.kd;
-                    pid.window_size = pid_temp.window_size;
-                    pid.max_val = pid_temp.max_val;
-                    pid.target = pid_temp.target;
+                    heater_1_pid.enabled = pid_temp.enable;
+                    heater_1_pid.kp = pid_temp.kp;
+                    heater_1_pid.ki = pid_temp.ki;
+                    heater_1_pid.kd = pid_temp.kd;
+                    heater_1_pid.window_size = pid_temp.window_size;
+                    heater_1_pid.max_val = pid_temp.max_val;
+                    heater_1_pid.target = pid_temp.target;
                     // update current temperature for state machine
-                    if let Ok(data) = measured_data_container_pid.lock(Duration::ms(5)) {
-                        current_temperature = data.t2;
+                    if let Ok(data) = measured_data_container_pid_1.lock(Duration::ms(5)) {
+                        heater_1_current_temperature = data.t2;
                     }
-                    pid_temp.current_temperature = current_temperature;
+                    pid_temp.current_temperature = heater_1_current_temperature;
                     // check if i has been reset
                     if pid_temp.reset_i {
-                        pid.i = 0.0;
+                        heater_1_pid.i = 0.0;
                         pid_temp.reset_i = false;
                     }
                     // push values
-                    pid_temp.p = pid.p;
-                    pid_temp.i = pid.i;
-                    pid_temp.d = pid.d;
-                    pid_temp.pid_val = pid.val;
-                    pid_temp.duty_cycle = pid.duty_cycle;
+                    pid_temp.p = heater_1_pid.p;
+                    pid_temp.i = heater_1_pid.i;
+                    pid_temp.d = heater_1_pid.d;
+                    pid_temp.pid_val = heater_1_pid.val;
+                    pid_temp.duty_cycle = heater_1_pid.duty_cycle;
                 }
-                match current_temperature {
+                match heater_1_current_temperature {
                     None => {
                         // if we have no temperature, we need to turn off the heater
-                        heater_1.set_low();
-                        fault_2_led.off();
-                        CurrentTask::delay(Duration::ms(pid.window_size));
+                        heater_1_pwm.disable();
+                        heater_1_pwm.set_duty(0);
                     }
                     Some(t) => {
                         // we use a window and set the pin high for the calculated duty_cycle,
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
                         // since the heating process is slow, it is okay to have a larger window size
-                        let mut duty_cycle = pid.get_heat_value(t, tick_timer.now().ticks());
-                        if let Some(duty_cycle_override) = boiler_override {
-                            duty_cycle = duty_cycle_override;
-                        }
-                        if duty_cycle == 0 || !pid.enabled {
-                            heater_1.set_low();
-                            fault_2_led.off();
-                            CurrentTask::delay(Duration::ms(pid.window_size));
-                        } else if duty_cycle > 0 && duty_cycle < pid.window_size {
-                            heater_1.set_high();
-                            fault_2_led.on();
-                            CurrentTask::delay(Duration::ms(duty_cycle));
-                            heater_1.set_low();
-                            fault_2_led.off();
-                            CurrentTask::delay(Duration::ms(pid.window_size - duty_cycle));
-                        } else if duty_cycle >= pid.window_size {
-                            heater_1.set_high();
-                            fault_2_led.on();
-                            CurrentTask::delay(Duration::ms(pid.window_size));
+                        let duty_cycle = heater_1_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let max_duty = heater_1_pwm.get_max_duty();
+                        if heater_1_pid.enabled {
+                            heater_1_pwm.enable();
+                            heater_1_pwm
+                                .set_duty((duty_cycle.clamp(0.0, 1.0) * (max_duty as f32)) as u16);
+                        } else {
+                            heater_1_pwm.disable();
+                            heater_1_pwm.set_duty(0);
                         }
                     }
                 }
+
+                if let Ok(cmd) = heater_2_command_queue_pid_2.receive(Duration::ms(5)) {
+                    match cmd {
+                        HeaterCommand::Temperature(temperature) => {
+                            heater_2_pid.target = temperature
+                        }
+                        HeaterCommand::Heating(enable) => heater_2_pid.enabled = enable,
+                        HeaterCommand::WindowSize(window_size) => {
+                            heater_2_pid.window_size = window_size as u32;
+                        }
+                        HeaterCommand::PidP(kp) => heater_2_pid.kp = kp,
+                        HeaterCommand::PidI(ki) => heater_2_pid.ki = ki,
+                        HeaterCommand::PidD(kd) => heater_2_pid.kd = kd,
+                        HeaterCommand::PidMaxVal(max_val) => heater_2_pid.max_val = max_val,
+                        HeaterCommand::Boiler1(boiler_1) => heater_2_boiler_override = boiler_1,
+                    }
+                }
+
+                if let Ok(mut pid_temp) = pid_2_data_container_pid_2.lock(Duration::ms(10)) {
+                    // get values
+                    heater_2_pid.enabled = pid_temp.enable;
+                    heater_2_pid.kp = pid_temp.kp;
+                    heater_2_pid.ki = pid_temp.ki;
+                    heater_2_pid.kd = pid_temp.kd;
+                    heater_2_pid.window_size = pid_temp.window_size;
+                    heater_2_pid.max_val = pid_temp.max_val;
+                    heater_2_pid.target = pid_temp.target;
+                    // update current temperature for state machine
+                    if let Ok(data) = measured_data_container_pid_2.lock(Duration::ms(5)) {
+                        // TODO
+                        heater_2_current_temperature = data.t2;
+                    }
+                    pid_temp.current_temperature = heater_2_current_temperature;
+                    // check if i has been reset
+                    if pid_temp.reset_i {
+                        heater_2_pid.i = 0.0;
+                        pid_temp.reset_i = false;
+                    }
+                    // push values
+                    pid_temp.p = heater_2_pid.p;
+                    pid_temp.i = heater_2_pid.i;
+                    pid_temp.d = heater_2_pid.d;
+                    pid_temp.pid_val = heater_2_pid.val;
+                    pid_temp.duty_cycle = heater_2_pid.duty_cycle;
+                }
+                match heater_2_current_temperature {
+                    None => {
+                        // if we have no temperature, we need to turn off the heater
+                        heater_2_pwm.disable();
+                        heater_2_pwm.set_duty(0);
+                    }
+                    Some(t) => {
+                        // we use a window and set the pin high for the calculated duty_cycle,
+                        // this is not really PWM, since the solid state relay only switches at zero-crossing
+                        // so we cannot use high frequency pwm
+                        // since the heating process is slow, it is okay to have a larger window size
+                        let duty_cycle = heater_2_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let max_duty = heater_2_pwm.get_max_duty();
+                        if heater_2_pid.enabled {
+                            heater_2_pwm.enable();
+                            heater_2_pwm
+                                .set_duty((duty_cycle.clamp(0.0, 1.0) * (max_duty as f32)) as u16);
+                        } else {
+                            heater_2_pwm.disable();
+                            heater_2_pwm.set_duty(0);
+                        }
+                    }
+                }
+
+                if let Ok(cmd) = brew_head_command_queue_pid_bg.receive(Duration::ms(5)) {
+                    match cmd {
+                        HeaterCommand::Temperature(temperature) => bg_pid.target = temperature,
+                        HeaterCommand::Heating(enable) => bg_pid.enabled = enable,
+                        HeaterCommand::WindowSize(window_size) => {
+                            bg_pid.window_size = window_size as u32;
+                        }
+                        HeaterCommand::PidP(kp) => bg_pid.kp = kp,
+                        HeaterCommand::PidI(ki) => bg_pid.ki = ki,
+                        HeaterCommand::PidD(kd) => bg_pid.kd = kd,
+                        HeaterCommand::PidMaxVal(max_val) => bg_pid.max_val = max_val,
+                        HeaterCommand::Boiler1(boiler_1) => bg_boiler_override = boiler_1,
+                    }
+                }
+
+                if let Ok(mut pid_temp) = pid_bg_data_container_pid_bg.lock(Duration::ms(10)) {
+                    // get values
+                    bg_pid.enabled = pid_temp.enable;
+                    bg_pid.kp = pid_temp.kp;
+                    bg_pid.ki = pid_temp.ki;
+                    bg_pid.kd = pid_temp.kd;
+                    bg_pid.window_size = pid_temp.window_size;
+                    bg_pid.max_val = pid_temp.max_val;
+                    bg_pid.target = pid_temp.target;
+                    // update current temperature for state machine
+                    if let Ok(data) = measured_data_container_pid_bg.lock(Duration::ms(5)) {
+                        // TODO
+                        bg_current_temperature = data.t2;
+                    }
+                    pid_temp.current_temperature = bg_current_temperature;
+                    // check if i has been reset
+                    if pid_temp.reset_i {
+                        bg_pid.i = 0.0;
+                        pid_temp.reset_i = false;
+                    }
+                    // push values
+                    pid_temp.p = bg_pid.p;
+                    pid_temp.i = bg_pid.i;
+                    pid_temp.d = bg_pid.d;
+                    pid_temp.pid_val = bg_pid.val;
+                    pid_temp.duty_cycle = bg_pid.duty_cycle;
+                }
+                match bg_current_temperature {
+                    None => {
+                        // if we have no temperature, we need to turn off the heater
+                        heater_bg_pwm.disable(Channel::C3);
+                        heater_bg_pwm.set_duty(Channel::C3, 0);
+                    }
+                    Some(t) => {
+                        // we use a window and set the pin high for the calculated duty_cycle,
+                        // this is not really PWM, since the solid state relay only switches at zero-crossing
+                        // so we cannot use high frequency pwm
+                        // since the heating process is slow, it is okay to have a larger window size
+                        let duty_cycle = bg_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let max_duty = heater_bg_pwm.get_max_duty();
+                        if bg_pid.enabled {
+                            heater_bg_pwm.enable(Channel::C3);
+                            heater_bg_pwm.set_duty(
+                                Channel::C3,
+                                (duty_cycle.clamp(0.0, 1.0) * (max_duty as f32)) as u16,
+                            );
+                        } else {
+                            heater_bg_pwm.disable(Channel::C3);
+                            heater_bg_pwm.set_duty(Channel::C3, 0);
+                        }
+                    }
+                }
+
+                CurrentTask::delay(Duration::ms(heater_1_pid.window_size));
             }
         })
         .unwrap();
@@ -665,7 +846,7 @@ fn main() -> ! {
                 {
                     temperature_data = temperature_data_temp.clone();
                 }
-                if let Ok(pid_data_temp) = pid_data_container_usb.lock(Duration::ms(5)) {
+                if let Ok(pid_data_temp) = pid_1_data_container_usb.lock(Duration::ms(5)) {
                     pid_data = pid_data_temp.clone();
                 }
                 if let Ok(interface_temp) = interface_data_container_usb.lock(Duration::ms(5)) {
@@ -685,7 +866,7 @@ fn main() -> ! {
                 if let Ok(cmd) = core::str::from_utf8(&message_bytes) {
                     extract_command(
                         cmd,
-                        &heater_command_queue_usb,
+                        &heater_1_command_queue_usb,
                         &pump_command_queue_usb,
                         &valve_command_queue_usb,
                         &mut hk,
@@ -739,7 +920,7 @@ fn main() -> ! {
                 {
                     temperature_data = temperature_data_temp.clone();
                 }
-                if let Ok(pid_data_temp) = pid_data_container_main.lock(Duration::ms(5)) {
+                if let Ok(pid_data_temp) = pid_1_data_container_main.lock(Duration::ms(5)) {
                     pid_data = pid_data_temp.clone();
                 }
                 if let Ok(interface_temp) = interface_data_container_main.lock(Duration::ms(5)) {
@@ -853,7 +1034,7 @@ fn main() -> ! {
                         led_state = LedState::On;
                         if interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
-                                pid_data_container_main.lock(Duration::ms(5))
+                                pid_1_data_container_main.lock(Duration::ms(5))
                             {
                                 previous_kp = pid_data_temp.kp;
                                 previous_ki = pid_data_temp.ki;
@@ -901,7 +1082,7 @@ fn main() -> ! {
                         // timeout of 30s
                         if timer >= extraction_time || lever.is_high() {
                             if let Ok(mut pid_data_temp) =
-                                pid_data_container_main.lock(Duration::ms(5))
+                                pid_1_data_container_main.lock(Duration::ms(5))
                             {
                                 pid_data_temp.kp = previous_kp;
                                 pid_data_temp.ki = previous_ki;
@@ -1043,7 +1224,7 @@ fn main() -> ! {
                 }
 
                 // send states
-                if let Ok(mut pid_data_temp) = pid_data_container_main.lock(Duration::ms(5)) {
+                if let Ok(mut pid_data_temp) = pid_1_data_container_main.lock(Duration::ms(5)) {
                     pid_data_temp.enable = pid_data.enable;
                 }
                 if let Ok(mut led_state_temp) = led_state_container_main.lock(Duration::ms(5)) {
