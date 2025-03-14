@@ -433,7 +433,6 @@ fn main() -> ! {
         .unwrap();
 
     Task::new()
-        // TODO combine all PIDs in one task
         .name("PID TASK")
         .stack_size(512)
         .priority(TaskPriority(1))
@@ -463,6 +462,10 @@ fn main() -> ! {
                 if check_shutdown() {
                     heater_1_pwm.disable();
                     heater_1_pwm.set_duty(0);
+                    heater_2_pwm.disable();
+                    heater_2_pwm.set_duty(0);
+                    heater_bg_pwm.disable(Channel::C3);
+                    heater_bg_pwm.set_duty(Channel::C3, 0);
                     fault_2_led.off();
                     break;
                 }
