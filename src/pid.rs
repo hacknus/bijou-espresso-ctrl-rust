@@ -1,3 +1,5 @@
+pub const STEADY_STATE_BOUNDS: f32 = 1.0;
+
 pub struct PID {
     pub enabled: bool,
     pub p: f32,

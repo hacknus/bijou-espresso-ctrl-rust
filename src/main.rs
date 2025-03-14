@@ -51,15 +51,18 @@ use crate::devices::max31865::Wires;
 use crate::devices::max31865::MAX31865;
 use crate::devices::pressure_sense::{read_pressure, ADC_MEMORY, G_XFR};
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
-use crate::pid::PID;
+use crate::mav::Mav;
+use crate::pid::{PID, STEADY_STATE_BOUNDS};
 use crate::usb::{usb_init, usb_println, usb_read};
 use crate::utils::{
-    Interface, LedState, MeasuredData, PidData, PumpData, PumpState, State, ValveState,
+    CoffeeState, HeaterState, Interface, LedState, MeasuredData, PidData, PumpData, PumpState,
+    State, ValveState,
 };
 
 mod commands;
 mod devices;
 mod intrpt;
+mod mav;
 mod pid;
 mod usb;
 mod utils;
@@ -285,7 +288,7 @@ fn main() -> ! {
     let led_state_container_main = led_state_container.clone();
     let led_state_container_led = led_state_container;
 
-    let state = State::Idle;
+    let state = State::default();
     let state_container = Arc::new(Mutex::new(state).expect("Failed to create data guard mutex"));
     let state_container_main = state_container.clone();
     let state_container_usb = state_container.clone();
@@ -441,9 +444,20 @@ fn main() -> ! {
             let mut heater_2_pid = PID::new();
             let mut heater_2_current_temperature = None;
             let mut heater_2_boiler_override = None;
-            let mut bg_pid = PID::new();
-            let mut bg_current_temperature = None;
-            let mut bg_boiler_override = None;
+            let mut heater_bg_pid = PID::new();
+            let mut heater_bg_current_temperature = None;
+            let mut heater_bg_boiler_override = None;
+
+            let mut state = State::default();
+
+            let mut mav_1 = Mav::new();
+            let mut mav_2 = Mav::new();
+            let mut mav_bg = Mav::new();
+
+            let mut mav_1_counter = 0;
+            let mut mav_2_counter = 0;
+            let mut mav_bg_counter = 0;
+            let mav_update_interval = 10;
 
             loop {
                 if check_shutdown() {
@@ -452,6 +466,10 @@ fn main() -> ! {
                     fault_2_led.off();
                     break;
                 }
+
+                mav_1_counter += 1;
+                mav_2_counter += 1;
+                mav_bg_counter += 1;
 
                 if let Ok(cmd) = heater_1_command_queue_pid_1.receive(Duration::ms(5)) {
                     match cmd {
@@ -495,6 +513,62 @@ fn main() -> ! {
                     pid_temp.d = heater_1_pid.d;
                     pid_temp.pid_val = heater_1_pid.val;
                     pid_temp.duty_cycle = heater_1_pid.duty_cycle;
+
+                    // state-machine
+                    match state.heater_1_state {
+                        HeaterState::Off => {
+                            if pid_temp.enable {
+                                if let Some(temperature) = pid_temp.current_temperature {
+                                    if heater_1_pid.target < temperature {
+                                        state.heater_1_state = HeaterState::CoolDown;
+                                    } else {
+                                        state.heater_1_state = HeaterState::HeatUp;
+                                    }
+                                }
+                            };
+                        }
+                        HeaterState::HeatUp | HeaterState::CoolDown => {
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                if heater_1_pid.target < temperature {
+                                    state.heater_1_state = HeaterState::CoolDown;
+                                } else {
+                                    state.heater_1_state = HeaterState::HeatUp;
+                                }
+                                // go in steady state if we are inside +/- steady state bounds K of target
+                                if heater_1_pid.target - STEADY_STATE_BOUNDS <= mav_1.evaluate()
+                                    && mav_1.evaluate() <= STEADY_STATE_BOUNDS + heater_1_pid.target
+                                    && heater_1_pid.target - STEADY_STATE_BOUNDS <= temperature
+                                    && temperature <= STEADY_STATE_BOUNDS + heater_1_pid.target
+                                    && mav_1.spread() < STEADY_STATE_BOUNDS / 2.0
+                                {
+                                    state.heater_1_state = HeaterState::SteadyState;
+                                }
+                            }
+                            if !pid_temp.enable {
+                                state.heater_1_state = HeaterState::Off;
+                            }
+                        }
+                        HeaterState::SteadyState => {
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                // if temperature falls outside of +/- steady state bounds K around target
+                                // then we are not in steady state
+                                if (heater_1_pid.target - STEADY_STATE_BOUNDS > mav_1.evaluate()
+                                    || mav_1.evaluate() > STEADY_STATE_BOUNDS + heater_1_pid.target)
+                                    || (heater_1_pid.target - STEADY_STATE_BOUNDS > temperature
+                                        || temperature > STEADY_STATE_BOUNDS + heater_1_pid.target)
+                                {
+                                    if heater_1_pid.target < temperature {
+                                        state.heater_1_state = HeaterState::CoolDown;
+                                    } else {
+                                        state.heater_1_state = HeaterState::HeatUp;
+                                    }
+                                }
+                            }
+                            if !pid_temp.enable {
+                                state.heater_1_state = HeaterState::Off;
+                            }
+                        }
+                    }
                 }
                 match heater_1_current_temperature {
                     None => {
@@ -503,6 +577,10 @@ fn main() -> ! {
                         heater_1_pwm.set_duty(0);
                     }
                     Some(t) => {
+                        if mav_1_counter > mav_update_interval {
+                            mav_1_counter = 0;
+                            mav_1.push(t);
+                        }
                         // we use a window and set the pin high for the calculated duty_cycle,
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
@@ -549,7 +627,7 @@ fn main() -> ! {
                     // update current temperature for state machine
                     if let Ok(data) = measured_data_container_pid_2.lock(Duration::ms(5)) {
                         // TODO
-                        heater_2_current_temperature = data.t2;
+                        heater_2_current_temperature = data.t1;
                     }
                     pid_temp.current_temperature = heater_2_current_temperature;
                     // check if i has been reset
@@ -563,6 +641,62 @@ fn main() -> ! {
                     pid_temp.d = heater_2_pid.d;
                     pid_temp.pid_val = heater_2_pid.val;
                     pid_temp.duty_cycle = heater_2_pid.duty_cycle;
+
+                    // state-machine
+                    match state.heater_2_state {
+                        HeaterState::Off => {
+                            if pid_temp.enable {
+                                if let Some(temperature) = pid_temp.current_temperature {
+                                    if heater_2_pid.target < temperature {
+                                        state.heater_2_state = HeaterState::CoolDown;
+                                    } else {
+                                        state.heater_2_state = HeaterState::HeatUp;
+                                    }
+                                }
+                            };
+                        }
+                        HeaterState::HeatUp | HeaterState::CoolDown => {
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                if heater_2_pid.target < temperature {
+                                    state.heater_2_state = HeaterState::CoolDown;
+                                } else {
+                                    state.heater_2_state = HeaterState::HeatUp;
+                                }
+                                // go in steady state if we are inside +/- steady state bounds K of target
+                                if heater_2_pid.target - STEADY_STATE_BOUNDS <= mav_2.evaluate()
+                                    && mav_2.evaluate() <= STEADY_STATE_BOUNDS + heater_2_pid.target
+                                    && heater_2_pid.target - STEADY_STATE_BOUNDS <= temperature
+                                    && temperature <= STEADY_STATE_BOUNDS + heater_2_pid.target
+                                    && mav_2.spread() < STEADY_STATE_BOUNDS / 2.0
+                                {
+                                    state.heater_2_state = HeaterState::SteadyState;
+                                }
+                            }
+                            if !pid_temp.enable {
+                                state.heater_2_state = HeaterState::Off;
+                            }
+                        }
+                        HeaterState::SteadyState => {
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                // if temperature falls outside of +/- steady state bounds K around target
+                                // then we are not in steady state
+                                if (heater_2_pid.target - STEADY_STATE_BOUNDS > mav_2.evaluate()
+                                    || mav_2.evaluate() > STEADY_STATE_BOUNDS + heater_2_pid.target)
+                                    || (heater_2_pid.target - STEADY_STATE_BOUNDS > temperature
+                                        || temperature > STEADY_STATE_BOUNDS + heater_2_pid.target)
+                                {
+                                    if heater_2_pid.target < temperature {
+                                        state.heater_2_state = HeaterState::CoolDown;
+                                    } else {
+                                        state.heater_2_state = HeaterState::HeatUp;
+                                    }
+                                }
+                            }
+                            if !pid_temp.enable {
+                                state.heater_2_state = HeaterState::Off;
+                            }
+                        }
+                    }
                 }
                 match heater_2_current_temperature {
                     None => {
@@ -571,6 +705,10 @@ fn main() -> ! {
                         heater_2_pwm.set_duty(0);
                     }
                     Some(t) => {
+                        if mav_2_counter > mav_update_interval {
+                            mav_2_counter = 0;
+                            mav_2.push(t);
+                        }
                         // we use a window and set the pin high for the calculated duty_cycle,
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
@@ -590,60 +728,123 @@ fn main() -> ! {
 
                 if let Ok(cmd) = heater_bg_command_queue_pid_bg.receive(Duration::ms(5)) {
                     match cmd {
-                        HeaterCommand::Temperature(temperature) => bg_pid.target = temperature,
-                        HeaterCommand::Heating(enable) => bg_pid.enabled = enable,
-                        HeaterCommand::WindowSize(window_size) => {
-                            bg_pid.window_size = window_size as u32;
+                        HeaterCommand::Temperature(temperature) => {
+                            heater_bg_pid.target = temperature
                         }
-                        HeaterCommand::PidP(kp) => bg_pid.kp = kp,
-                        HeaterCommand::PidI(ki) => bg_pid.ki = ki,
-                        HeaterCommand::PidD(kd) => bg_pid.kd = kd,
-                        HeaterCommand::PidMaxVal(max_val) => bg_pid.max_val = max_val,
-                        HeaterCommand::Boiler1(boiler_1) => bg_boiler_override = boiler_1,
+                        HeaterCommand::Heating(enable) => heater_bg_pid.enabled = enable,
+                        HeaterCommand::WindowSize(window_size) => {
+                            heater_bg_pid.window_size = window_size as u32;
+                        }
+                        HeaterCommand::PidP(kp) => heater_bg_pid.kp = kp,
+                        HeaterCommand::PidI(ki) => heater_bg_pid.ki = ki,
+                        HeaterCommand::PidD(kd) => heater_bg_pid.kd = kd,
+                        HeaterCommand::PidMaxVal(max_val) => heater_bg_pid.max_val = max_val,
+                        HeaterCommand::Boiler1(boiler_1) => heater_bg_boiler_override = boiler_1,
                     }
                 }
 
                 if let Ok(mut pid_temp) = pid_bg_data_container_pid_bg.lock(Duration::ms(10)) {
                     // get values
-                    bg_pid.enabled = pid_temp.enable;
-                    bg_pid.kp = pid_temp.kp;
-                    bg_pid.ki = pid_temp.ki;
-                    bg_pid.kd = pid_temp.kd;
-                    bg_pid.window_size = pid_temp.window_size;
-                    bg_pid.max_val = pid_temp.max_val;
-                    bg_pid.target = pid_temp.target;
+                    heater_bg_pid.enabled = pid_temp.enable;
+                    heater_bg_pid.kp = pid_temp.kp;
+                    heater_bg_pid.ki = pid_temp.ki;
+                    heater_bg_pid.kd = pid_temp.kd;
+                    heater_bg_pid.window_size = pid_temp.window_size;
+                    heater_bg_pid.max_val = pid_temp.max_val;
+                    heater_bg_pid.target = pid_temp.target;
                     // update current temperature for state machine
                     if let Ok(data) = measured_data_container_pid_bg.lock(Duration::ms(5)) {
-                        // TODO
-                        bg_current_temperature = data.t2;
+                        heater_bg_current_temperature = data.t3;
                     }
-                    pid_temp.current_temperature = bg_current_temperature;
+                    pid_temp.current_temperature = heater_bg_current_temperature;
                     // check if i has been reset
                     if pid_temp.reset_i {
-                        bg_pid.i = 0.0;
+                        heater_bg_pid.i = 0.0;
                         pid_temp.reset_i = false;
                     }
                     // push values
-                    pid_temp.p = bg_pid.p;
-                    pid_temp.i = bg_pid.i;
-                    pid_temp.d = bg_pid.d;
-                    pid_temp.pid_val = bg_pid.val;
-                    pid_temp.duty_cycle = bg_pid.duty_cycle;
+                    pid_temp.p = heater_bg_pid.p;
+                    pid_temp.i = heater_bg_pid.i;
+                    pid_temp.d = heater_bg_pid.d;
+                    pid_temp.pid_val = heater_bg_pid.val;
+                    pid_temp.duty_cycle = heater_bg_pid.duty_cycle;
+
+                    // state-machine
+                    match state.heater_bg_state {
+                        HeaterState::Off => {
+                            if pid_temp.enable {
+                                if let Some(temperature) = pid_temp.current_temperature {
+                                    if heater_bg_pid.target < temperature {
+                                        state.heater_bg_state = HeaterState::CoolDown;
+                                    } else {
+                                        state.heater_bg_state = HeaterState::HeatUp;
+                                    }
+                                }
+                            };
+                        }
+                        HeaterState::HeatUp | HeaterState::CoolDown => {
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                if heater_bg_pid.target < temperature {
+                                    state.heater_bg_state = HeaterState::CoolDown;
+                                } else {
+                                    state.heater_bg_state = HeaterState::HeatUp;
+                                }
+                                // go in steady state if we are inside +/- steady state bounds K of target
+                                if heater_bg_pid.target - STEADY_STATE_BOUNDS <= mav_bg.evaluate()
+                                    && mav_bg.evaluate()
+                                        <= STEADY_STATE_BOUNDS + heater_bg_pid.target
+                                    && heater_bg_pid.target - STEADY_STATE_BOUNDS <= temperature
+                                    && temperature <= STEADY_STATE_BOUNDS + heater_bg_pid.target
+                                    && mav_bg.spread() < STEADY_STATE_BOUNDS / 2.0
+                                {
+                                    state.heater_bg_state = HeaterState::SteadyState;
+                                }
+                            }
+                            if !pid_temp.enable {
+                                state.heater_bg_state = HeaterState::Off;
+                            }
+                        }
+                        HeaterState::SteadyState => {
+                            if let Some(temperature) = pid_temp.current_temperature {
+                                // if temperature falls outside of +/- steady state bounds K around target
+                                // then we are not in steady state
+                                if (heater_bg_pid.target - STEADY_STATE_BOUNDS > mav_bg.evaluate()
+                                    || mav_bg.evaluate()
+                                        > STEADY_STATE_BOUNDS + heater_bg_pid.target)
+                                    || (heater_bg_pid.target - STEADY_STATE_BOUNDS > temperature
+                                        || temperature > STEADY_STATE_BOUNDS + heater_bg_pid.target)
+                                {
+                                    if heater_bg_pid.target < temperature {
+                                        state.heater_bg_state = HeaterState::CoolDown;
+                                    } else {
+                                        state.heater_bg_state = HeaterState::HeatUp;
+                                    }
+                                }
+                            }
+                            if !pid_temp.enable {
+                                state.heater_bg_state = HeaterState::Off;
+                            }
+                        }
+                    }
                 }
-                match bg_current_temperature {
+                match heater_bg_current_temperature {
                     None => {
                         // if we have no temperature, we need to turn off the heater
                         heater_bg_pwm.disable(Channel::C3);
                         heater_bg_pwm.set_duty(Channel::C3, 0);
                     }
                     Some(t) => {
+                        if mav_bg_counter > mav_update_interval {
+                            mav_bg_counter = 0;
+                            mav_bg.push(t);
+                        }
                         // we use a window and set the pin high for the calculated duty_cycle,
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
                         // since the heating process is slow, it is okay to have a larger window size
-                        let duty_cycle = bg_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let duty_cycle = heater_bg_pid.get_heat_value(t, tick_timer.now().ticks());
                         let max_duty = heater_bg_pwm.get_max_duty();
-                        if bg_pid.enabled {
+                        if heater_bg_pid.enabled {
                             heater_bg_pwm.enable(Channel::C3);
                             heater_bg_pwm.set_duty(
                                 Channel::C3,
@@ -834,7 +1035,7 @@ fn main() -> ! {
             let mut pump = PumpData::default();
             let mut hk_rate = 500.0;
             let mut hk = true;
-            let mut state = State::Idle;
+            let mut state = State::default();
 
             loop {
                 if check_shutdown() {
@@ -912,7 +1113,7 @@ fn main() -> ! {
             let mut pump = PumpData::default();
             let mut interface = Interface::default();
             let mut led_state;
-            let mut state = State::Idle;
+            let mut state = State::default();
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
@@ -1012,21 +1213,17 @@ fn main() -> ! {
                     }
                 }
 
-                // state-machine
-
-                let mut valve1_state = ValveState::Closed;
-                let mut valve2_state = ValveState::Closed;
-                let mut pump_state = PumpState::Off;
+                // Main State-Machine
 
                 interface.button = button.is_low();
                 interface.lever_switch = lever.is_low();
 
-                match state {
-                    State::Idle => {
-                        pump_state = PumpState::Off;
+                match state.coffee_state {
+                    CoffeeState::Idle => {
+                        state.pump_state = PumpState::Off;
 
-                        valve1_state = ValveState::Closed;
-                        valve2_state = ValveState::Closed;
+                        state.valve_1_state = ValveState::Closed;
+                        state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::Off;
                         pid_1_data.enable = false;
@@ -1034,22 +1231,24 @@ fn main() -> ! {
                         pid_bg_data.enable = true;
                         pid_bg_data.target = 60.0;
                         if (interface.button || pid_1_data.enable) && !water_low {
-                            state = State::CoffeeHeating;
+                            state.coffee_state = CoffeeState::CoffeeHeating;
+                            state.heater_1_state = HeaterState::HeatUp;
+                            state.heater_bg_state = HeaterState::HeatUp;
                         }
                     }
-                    State::CoffeeHeating => {
+                    CoffeeState::CoffeeHeating => {
                         pid_1_data.enable = true;
                         pid_bg_data.enable = true;
                         pid_bg_data.target = 85.0;
                         led_state = LedState::SlowSine;
 
-                        if let Some(temperature) = temperature_data.t3 {
-                            if interface.brew_head_temperature <= temperature {
-                                state = State::Ready;
-                            }
+                        if state.heater_1_state == HeaterState::SteadyState
+                            && state.heater_bg_state == HeaterState::SteadyState
+                        {
+                            state.coffee_state = CoffeeState::Ready;
                         }
                     }
-                    State::Ready => {
+                    CoffeeState::Ready => {
                         led_state = LedState::On;
                         if interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
@@ -1063,38 +1262,38 @@ fn main() -> ! {
                                 pid_data_temp.kp *= 2.0;
                                 pid_data_temp.target += 2.0;
                             }
-                            state = State::PreInfuse;
+                            state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
                         }
-                        if let Some(temperature) = temperature_data.t3 {
-                            if interface.brew_head_temperature * 0.95 > temperature {
-                                state = State::CoffeeHeating;
-                            }
+                        if state.heater_1_state != HeaterState::SteadyState
+                            || state.heater_bg_state != HeaterState::SteadyState
+                        {
+                            state.coffee_state = CoffeeState::CoffeeHeating;
                         }
                     }
-                    State::PreInfuse => {
-                        pump_state = PumpState::On(
+                    CoffeeState::PreInfuse => {
+                        state.pump_state = PumpState::On(
                             (max_duty as f32 * (pump.pre_infuse_power / 100.0)) as u16,
                         );
 
-                        valve1_state = ValveState::Closed;
-                        valve2_state = ValveState::Closed;
+                        state.valve_1_state = ValveState::Closed;
+                        state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::SlowBlink;
                         // timer of 2.5s
                         if timer >= 5 {
-                            state = State::Extracting;
+                            state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
                         }
                     }
-                    State::Extracting => {
-                        pump_state =
+                    CoffeeState::Extracting => {
+                        state.pump_state =
                             PumpState::On((max_duty as f32 * (pump.extract_power / 100.0)) as u16);
 
                         // TODO: we need to set duty cycle to a high value for heating during extraction!
 
-                        valve1_state = ValveState::Closed;
-                        valve2_state = ValveState::Closed;
+                        state.valve_1_state = ValveState::Closed;
+                        state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::FastBlink;
 
@@ -1108,38 +1307,37 @@ fn main() -> ! {
                                 pid_data_temp.kd = previous_kd;
                                 pid_data_temp.target = previous_target;
                             }
-                            state = State::Ready;
+                            state.coffee_state = CoffeeState::Ready;
                         }
                     }
-                    State::SteamHeating => {
-                        pump_state = PumpState::Off;
+                    CoffeeState::SteamHeating => {
+                        state.pump_state = PumpState::Off;
 
-                        valve1_state = ValveState::Closed;
-                        valve2_state = ValveState::Closed;
+                        state.valve_1_state = ValveState::Closed;
+                        state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::SlowSine;
-                        if let Some(temperature) = temperature_data.t2 {
-                            if interface.steam_temperature * 0.95 <= temperature
-                                && temperature <= 1.05 * interface.steam_temperature
-                            {
-                                state = State::Ready;
-                            }
+                        if state.heater_1_state == HeaterState::SteadyState
+                            && state.heater_2_state == HeaterState::SteadyState
+                        {
+                            state.coffee_state = CoffeeState::Ready;
                         }
                     }
-                    State::Steaming => {
-                        pump_state =
+                    CoffeeState::Steaming => {
+                        state.pump_state =
                             PumpState::On((max_duty as f32 * (pump.steam_power / 100.0)) as u16);
 
                         led_state = LedState::FastBlink;
 
-                        valve1_state = ValveState::Closed;
-                        valve2_state = ValveState::Open;
+                        state.valve_1_state = ValveState::Closed;
+                        state.valve_2_state = ValveState::Open;
 
                         // TODO: set exit condition here
+                        state.coffee_state = CoffeeState::Ready;
                     }
                 }
 
-                match pump_state {
+                match state.pump_state {
                     PumpState::Off => match pump_override {
                         None => {
                             bldc_pwm.set_duty(0);
@@ -1182,7 +1380,7 @@ fn main() -> ! {
                     },
                 }
 
-                match valve1_state {
+                match state.valve_1_state {
                     ValveState::Open => match valve_1_override {
                         None => {
                             valve1_pin.set_low();
@@ -1209,7 +1407,7 @@ fn main() -> ! {
                     },
                 }
 
-                match valve2_state {
+                match state.valve_2_state {
                     ValveState::Open => match valve_2_override {
                         None => {
                             valve2_pin.set_low();

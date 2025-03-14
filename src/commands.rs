@@ -4,7 +4,7 @@ use arrform::{arrform, ArrForm};
 use freertos_rust::{Duration, Queue};
 
 use crate::usb_println;
-use crate::utils::{Interface, MeasuredData, PidData, PumpData, State};
+use crate::utils::{CoffeeState, Interface, MeasuredData, PidData, PumpData, State};
 
 #[derive(Copy, Clone, Debug)]
 pub enum PumpCommand {
@@ -497,7 +497,7 @@ pub fn send_housekeeping(
     let hk = arrform!(
         128,
         "[SYS] {:?}, {}, {}, {}, {}, {}, {}, {}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {}, {}",
-        state,
+        state.coffee_state,
         interface.lever_switch,
         interface.steam_open,
         interface.water_low,
