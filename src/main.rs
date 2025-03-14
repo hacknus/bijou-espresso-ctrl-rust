@@ -89,19 +89,26 @@ fn main() -> ! {
         .pclk2(24.MHz())
         .freeze();
 
-    // TODO check if TIM4 actually works, before it was TIM5
-    let mut tick_timer = dp.TIM4.counter_ms(&clocks);
-    tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
-
-    let mut delay = dp.TIM1.delay_us(&clocks);
-    delay.delay(100.millis()); // apparently required for USB to set up properly...
-
     // initialize ports
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
     let gpioc = dp.GPIOC.split();
     let gpiod = dp.GPIOD.split();
     let gpioe = dp.GPIOE.split();
+
+    // initialize leds
+    let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
+    let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
+    let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
+
+    // TODO check if TIM4 actually works, before it was TIM5
+    let mut tick_timer = dp.TIM4.counter_ms(&clocks);
+    // tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
+
+    stat_led.on();
+
+    let mut delay = dp.TIM1.delay_us(&clocks);
+    delay.delay(100.millis()); // apparently required for USB to set up properly...
 
     // initialize DMA
     let dma2 = StreamsTuple::new(dp.DMA2);
@@ -132,11 +139,6 @@ fn main() -> ! {
     enc_pin_b.make_interrupt_source(&mut syscfg);
     enc_pin_b.trigger_on_edge(&mut dp.EXTI, Edge::RisingFalling);
     enc_pin_b.enable_interrupt(&mut dp.EXTI);
-
-    // initialize leds
-    let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
-    let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
-    let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize button
     let button = gpiob.pb0.into_floating_input();
@@ -432,7 +434,7 @@ fn main() -> ! {
     Task::new()
         // TODO combine all PIDs in one task
         .name("PID TASK")
-        .stack_size(512)
+        .stack_size(1024)
         .priority(TaskPriority(1))
         .start(move || {
             let mut heater_1_pid = PID::new();
@@ -823,7 +825,7 @@ fn main() -> ! {
 
     Task::new()
         .name("USB TASK")
-        .stack_size(1024)
+        .stack_size(2048)
         .priority(TaskPriority(3))
         .start(move || {
             let mut temperature_data = MeasuredData::default();
