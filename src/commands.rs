@@ -56,7 +56,9 @@ fn extract_value(cmd: &str) -> Option<f32> {
 
 pub fn extract_command(
     cmd: &str,
-    heater_command_queue: &Arc<Queue<HeaterCommand>>,
+    heater_1_command_queue: &Arc<Queue<HeaterCommand>>,
+    heater_2_command_queue: &Arc<Queue<HeaterCommand>>,
+    heater_bg_command_queue: &Arc<Queue<HeaterCommand>>,
     pump_command_queue: &Arc<Queue<PumpCommand>>,
     valve_command_queue: &Arc<Queue<ValveCommand>>,
     hk: &mut bool,
@@ -67,9 +69,15 @@ pub fn extract_command(
             match extract_value(cmd) {
                 None => cmd_has_no_value(),
                 Some(val) => {
-                    heater_command_queue
+                    heater_1_command_queue
                         .send(
                             HeaterCommand::Temperature(val),
+                            Duration::ms(CMD_QUEUE_TIMEOUT),
+                        )
+                        .unwrap();
+                    heater_2_command_queue
+                        .send(
+                            HeaterCommand::Temperature(val - 5.0),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -90,41 +98,101 @@ pub fn extract_command(
                     )
                 }
             }
-        } else if cmd.contains("[CMD] setP=") {
+        } else if cmd.contains("[CMD] set1P=") {
             match extract_value(cmd) {
                 None => cmd_has_no_value(),
                 Some(val) => {
-                    heater_command_queue
+                    heater_1_command_queue
                         .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
-                    arrform!(64, "[ACK] cmd OK, set p value = {}", val)
+                    arrform!(64, "[ACK] cmd OK, set PID1 p value = {}", val)
                 }
             }
-        } else if cmd.contains("[CMD] setI=") {
+        } else if cmd.contains("[CMD] set1I=") {
             match extract_value(cmd) {
                 None => cmd_has_no_value(),
                 Some(val) => {
-                    heater_command_queue
+                    heater_1_command_queue
                         .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
-                    arrform!(64, "[ACK] cmd OK, set i value = {}", val)
+                    arrform!(64, "[ACK] cmd OK, set PID1 i value = {}", val)
                 }
             }
-        } else if cmd.contains("[CMD] setD=") {
+        } else if cmd.contains("[CMD] set1D=") {
             match extract_value(cmd) {
                 None => cmd_has_no_value(),
                 Some(val) => {
-                    heater_command_queue
+                    heater_1_command_queue
                         .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
-                    arrform!(64, "[ACK] cmd OK, set d value = {}", val)
+                    arrform!(64, "[ACK] cmd OK, set PID1 d value = {}", val)
+                }
+            }
+        } else if cmd.contains("[CMD] set2P=") {
+            match extract_value(cmd) {
+                None => cmd_has_no_value(),
+                Some(val) => {
+                    heater_2_command_queue
+                        .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    arrform!(64, "[ACK] cmd OK, set PID2 p value = {}", val)
+                }
+            }
+        } else if cmd.contains("[CMD] set2I=") {
+            match extract_value(cmd) {
+                None => cmd_has_no_value(),
+                Some(val) => {
+                    heater_2_command_queue
+                        .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    arrform!(64, "[ACK] cmd OK, set PID2 i value = {}", val)
+                }
+            }
+        } else if cmd.contains("[CMD] set2D=") {
+            match extract_value(cmd) {
+                None => cmd_has_no_value(),
+                Some(val) => {
+                    heater_2_command_queue
+                        .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    arrform!(64, "[ACK] cmd OK, set PID2 d value = {}", val)
+                }
+            }
+        } else if cmd.contains("[CMD] setBGP=") {
+            match extract_value(cmd) {
+                None => cmd_has_no_value(),
+                Some(val) => {
+                    heater_bg_command_queue
+                        .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    arrform!(64, "[ACK] cmd OK, set PID BG p value = {}", val)
+                }
+            }
+        } else if cmd.contains("[CMD] setBGI=") {
+            match extract_value(cmd) {
+                None => cmd_has_no_value(),
+                Some(val) => {
+                    heater_bg_command_queue
+                        .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    arrform!(64, "[ACK] cmd OK, set PID BG i value = {}", val)
+                }
+            }
+        } else if cmd.contains("[CMD] setBGD=") {
+            match extract_value(cmd) {
+                None => cmd_has_no_value(),
+                Some(val) => {
+                    heater_bg_command_queue
+                        .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    arrform!(64, "[ACK] cmd OK, set PID BG d value = {}", val)
                 }
             }
         } else if cmd.contains("[CMD] setWindowSize=") {
             match extract_value(cmd) {
                 None => cmd_has_no_value(),
                 Some(val) => {
-                    heater_command_queue
+                    heater_1_command_queue
                         .send(
                             HeaterCommand::WindowSize(val),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
@@ -137,7 +205,7 @@ pub fn extract_command(
             match extract_value(cmd) {
                 None => cmd_has_no_value(),
                 Some(val) => {
-                    heater_command_queue
+                    heater_1_command_queue
                         .send(
                             HeaterCommand::PidMaxVal(val),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
@@ -240,16 +308,88 @@ pub fn extract_command(
                 .send(ValveCommand::Valve2(None), Duration::ms(CMD_QUEUE_TIMEOUT))
                 .unwrap();
             cmd_ok()
-        } else if cmd.contains("[CMD] startHeating") {
-            heater_command_queue
+        } else if cmd.contains("[CMD] startHeating1") {
+            heater_1_command_queue
                 .send(
                     HeaterCommand::Heating(true),
                     Duration::ms(CMD_QUEUE_TIMEOUT),
                 )
                 .unwrap();
             cmd_ok()
-        } else if cmd.contains("[CMD] stopHeating") {
-            heater_command_queue
+        } else if cmd.contains("[CMD] stopHeating1") {
+            heater_1_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] startHeating2") {
+            heater_2_command_queue
+                .send(
+                    HeaterCommand::Heating(true),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] stopHeating2") {
+            heater_2_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] startHeatingBG") {
+            heater_bg_command_queue
+                .send(
+                    HeaterCommand::Heating(true),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] stopHeatingBG") {
+            heater_bg_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] startHeatingAll") {
+            heater_1_command_queue
+                .send(
+                    HeaterCommand::Heating(true),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            heater_2_command_queue
+                .send(
+                    HeaterCommand::Heating(true),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            heater_bg_command_queue
+                .send(
+                    HeaterCommand::Heating(true),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            cmd_ok()
+        } else if cmd.contains("[CMD] stopHeatingAll") {
+            heater_1_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            heater_2_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            heater_bg_command_queue
                 .send(
                     HeaterCommand::Heating(false),
                     Duration::ms(CMD_QUEUE_TIMEOUT),
@@ -279,7 +419,19 @@ pub fn extract_command(
                     Duration::ms(CMD_QUEUE_TIMEOUT),
                 )
                 .unwrap();
-            heater_command_queue
+            heater_1_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            heater_2_command_queue
+                .send(
+                    HeaterCommand::Heating(false),
+                    Duration::ms(CMD_QUEUE_TIMEOUT),
+                )
+                .unwrap();
+            heater_bg_command_queue
                 .send(
                     HeaterCommand::Heating(false),
                     Duration::ms(CMD_QUEUE_TIMEOUT),
@@ -312,6 +464,8 @@ pub fn extract_command(
                 }
                 None => cmd_has_no_value(),
             }
+        } else if cmd.contains("Ping") {
+            arrform!(64, "Pong")
         } else {
             // invalid command
             cmd_invalid()

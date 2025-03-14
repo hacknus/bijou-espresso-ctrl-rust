@@ -352,9 +352,9 @@ fn main() -> ! {
     let heater_2_command_queue_pid_2 = heater_2_command_queue.clone();
     let heater_2_command_queue_usb = heater_2_command_queue;
 
-    let brew_head_command_queue = Arc::new(Queue::new(10).unwrap());
-    let brew_head_command_queue_pid_bg = brew_head_command_queue.clone();
-    let brew_head_command_queue_usb = brew_head_command_queue;
+    let heater_bg_command_queue = Arc::new(Queue::new(10).unwrap());
+    let heater_bg_command_queue_pid_bg = heater_bg_command_queue.clone();
+    let heater_bg_command_queue_usb = heater_bg_command_queue;
 
     let valve_command_queue = Arc::new(Queue::new(10).unwrap());
     let valve_command_queue_main = valve_command_queue.clone();
@@ -588,7 +588,7 @@ fn main() -> ! {
                     }
                 }
 
-                if let Ok(cmd) = brew_head_command_queue_pid_bg.receive(Duration::ms(5)) {
+                if let Ok(cmd) = heater_bg_command_queue_pid_bg.receive(Duration::ms(5)) {
                     match cmd {
                         HeaterCommand::Temperature(temperature) => bg_pid.target = temperature,
                         HeaterCommand::Heating(enable) => bg_pid.enabled = enable,
@@ -827,7 +827,9 @@ fn main() -> ! {
         .priority(TaskPriority(3))
         .start(move || {
             let mut temperature_data = MeasuredData::default();
-            let mut pid_data = PidData::default();
+            let mut pid_1_data = PidData::default();
+            let mut pid_2_data = PidData::default();
+            let mut pid_bg_data = PidData::default();
             let mut interface = Interface::default();
             let mut pump = PumpData::default();
             let mut hk_rate = 500.0;
@@ -847,7 +849,13 @@ fn main() -> ! {
                     temperature_data = temperature_data_temp.clone();
                 }
                 if let Ok(pid_data_temp) = pid_1_data_container_usb.lock(Duration::ms(5)) {
-                    pid_data = pid_data_temp.clone();
+                    pid_1_data = pid_data_temp.clone();
+                }
+                if let Ok(pid_data_temp) = pid_2_data_container_usb.lock(Duration::ms(5)) {
+                    pid_2_data = pid_data_temp.clone();
+                }
+                if let Ok(pid_data_temp) = pid_bg_data_container_usb.lock(Duration::ms(5)) {
+                    pid_bg_data = pid_data_temp.clone();
                 }
                 if let Ok(interface_temp) = interface_data_container_usb.lock(Duration::ms(5)) {
                     interface = interface_temp.clone();
@@ -859,7 +867,14 @@ fn main() -> ! {
                     state = state_temp.clone();
                 }
 
-                send_housekeeping(&state, &temperature_data, &interface, &pid_data, &pump, "");
+                send_housekeeping(
+                    &state,
+                    &temperature_data,
+                    &interface,
+                    &pid_1_data,
+                    &pump,
+                    "",
+                );
 
                 let mut message_bytes = [0; 1024];
                 usb_read(&mut message_bytes);
@@ -867,6 +882,8 @@ fn main() -> ! {
                     extract_command(
                         cmd,
                         &heater_1_command_queue_usb,
+                        &heater_2_command_queue_usb,
+                        &heater_bg_command_queue_usb,
                         &pump_command_queue_usb,
                         &valve_command_queue_usb,
                         &mut hk,
@@ -889,7 +906,9 @@ fn main() -> ! {
         .priority(TaskPriority(2))
         .start(move || {
             let mut temperature_data = MeasuredData::default();
-            let mut pid_data = PidData::default();
+            let mut pid_1_data = PidData::default();
+            let mut pid_2_data = PidData::default();
+            let mut pid_bg_data = PidData::default();
             let mut pump = PumpData::default();
             let mut interface = Interface::default();
             let mut led_state;
@@ -904,10 +923,10 @@ fn main() -> ! {
 
             let mut pump_override = None;
 
-            let mut previous_kp = pid_data.kp;
-            let mut previous_ki = pid_data.ki;
-            let mut previous_kd = pid_data.kd;
-            let mut previous_target = pid_data.target;
+            let mut previous_kp = pid_1_data.kp;
+            let mut previous_ki = pid_1_data.ki;
+            let mut previous_kd = pid_1_data.kd;
+            let mut previous_target = pid_1_data.target;
 
             loop {
                 if check_shutdown() {
@@ -921,7 +940,13 @@ fn main() -> ! {
                     temperature_data = temperature_data_temp.clone();
                 }
                 if let Ok(pid_data_temp) = pid_1_data_container_main.lock(Duration::ms(5)) {
-                    pid_data = pid_data_temp.clone();
+                    pid_1_data = pid_data_temp.clone();
+                }
+                if let Ok(pid_data_temp) = pid_2_data_container_main.lock(Duration::ms(5)) {
+                    pid_2_data = pid_data_temp.clone();
+                }
+                if let Ok(pid_data_temp) = pid_bg_data_container_main.lock(Duration::ms(5)) {
+                    pid_bg_data = pid_data_temp.clone();
                 }
                 if let Ok(interface_temp) = interface_data_container_main.lock(Duration::ms(5)) {
                     interface = interface_temp.clone();
@@ -1004,20 +1029,19 @@ fn main() -> ! {
                         valve2_state = ValveState::Closed;
 
                         led_state = LedState::Off;
-                        pid_data.enable = false;
-                        if (interface.button || pid_data.enable) && !water_low {
+                        pid_1_data.enable = false;
+                        pid_2_data.enable = false;
+                        pid_bg_data.enable = true;
+                        pid_bg_data.target = 60.0;
+                        if (interface.button || pid_1_data.enable) && !water_low {
                             state = State::CoffeeHeating;
                         }
                     }
                     State::CoffeeHeating => {
-                        pump_state =
-                            PumpState::On((max_duty as f32 * (pump.heat_up_power / 100.0)) as u16);
-
-                        pid_data.enable = true;
+                        pid_1_data.enable = true;
+                        pid_bg_data.enable = true;
+                        pid_bg_data.target = 85.0;
                         led_state = LedState::SlowSine;
-
-                        valve1_state = ValveState::Open;
-                        valve2_state = ValveState::Closed;
 
                         if let Some(temperature) = temperature_data.t3 {
                             if interface.brew_head_temperature <= temperature {
@@ -1026,11 +1050,6 @@ fn main() -> ! {
                         }
                     }
                     State::Ready => {
-                        pump_state = PumpState::Off;
-
-                        valve1_state = ValveState::Closed;
-                        valve2_state = ValveState::Closed;
-
                         led_state = LedState::On;
                         if interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
@@ -1062,8 +1081,8 @@ fn main() -> ! {
                         valve2_state = ValveState::Closed;
 
                         led_state = LedState::SlowBlink;
-                        // timer of 5s
-                        if timer >= 10 {
+                        // timer of 2.5s
+                        if timer >= 5 {
                             state = State::Extracting;
                             timer = 0;
                         }
@@ -1225,7 +1244,14 @@ fn main() -> ! {
 
                 // send states
                 if let Ok(mut pid_data_temp) = pid_1_data_container_main.lock(Duration::ms(5)) {
-                    pid_data_temp.enable = pid_data.enable;
+                    pid_data_temp.enable = pid_1_data.enable;
+                }
+                if let Ok(mut pid_data_temp) = pid_2_data_container_main.lock(Duration::ms(5)) {
+                    pid_data_temp.enable = pid_2_data.enable;
+                }
+                if let Ok(mut pid_data_temp) = pid_bg_data_container_main.lock(Duration::ms(5)) {
+                    pid_data_temp.enable = pid_bg_data.enable;
+                    pid_data_temp.target = pid_bg_data.target;
                 }
                 if let Ok(mut led_state_temp) = led_state_container_main.lock(Duration::ms(5)) {
                     *led_state_temp = led_state.clone();
