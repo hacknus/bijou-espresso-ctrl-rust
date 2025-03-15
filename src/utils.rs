@@ -156,7 +156,6 @@ pub struct State {
     pub heater_1_state: HeaterState,
     pub heater_2_state: HeaterState,
     pub heater_bg_state: HeaterState,
-    pub gate_valve_state: bool,
     pub valve_1_state: ValveState,
     pub valve_2_state: ValveState,
 }

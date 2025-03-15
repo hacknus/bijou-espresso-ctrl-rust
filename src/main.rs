@@ -294,7 +294,7 @@ fn main() -> ! {
     let state_container = Arc::new(Mutex::new(state).expect("Failed to create data guard mutex"));
     let state_container_main = state_container.clone();
     let state_container_usb = state_container.clone();
-    let _state_container_pid = state_container;
+    let state_container_pid = state_container;
 
     let measured_data = MeasuredData::default();
     let measured_data_container =
@@ -470,6 +470,13 @@ fn main() -> ! {
                     heater_bg_pwm.set_duty(Channel::C3, 0);
                     fault_2_led.off();
                     break;
+                }
+
+                if let Ok( state_temp) = state_container_pid.lock(Duration::ms(5)) {
+                    state.pump_state = state_temp.pump_state.clone();
+                    state.coffee_state = state_temp.coffee_state.clone();
+                    state.valve_1_state = state_temp.valve_1_state.clone();
+                    state.valve_2_state = state_temp.valve_2_state.clone();
                 }
 
                 mav_1_counter += 1;
@@ -862,6 +869,10 @@ fn main() -> ! {
                     }
                 }
 
+                if let Ok(mut state_temp) = state_container_pid.lock(Duration::ms(5)) {
+                    *state_temp = state.clone();
+                }
+
                 CurrentTask::delay(Duration::ms(heater_1_pid.window_size));
             }
         })
@@ -1122,7 +1133,7 @@ fn main() -> ! {
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            let mut extraction_time = 20 * main_task_period;
+            let mut extraction_time = 20;
 
             let mut valve_1_override = None;
             let mut valve_2_override = None;
@@ -1264,8 +1275,8 @@ fn main() -> ! {
                                 previous_kd = pid_data_temp.kd;
                                 previous_target = pid_data_temp.target;
                                 // increase p value for extraction!
-                                pid_data_temp.kp *= 2.0;
-                                pid_data_temp.target += 2.0;
+                                // pid_data_temp.kp *= 2.0;
+                                // pid_data_temp.target += 2.0;
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
@@ -1302,8 +1313,8 @@ fn main() -> ! {
 
                         led_state = LedState::FastBlink;
 
-                        // timeout of 30s
-                        if timer >= extraction_time || lever.is_high() {
+                        // timeout
+                        if timer >= extraction_time || interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
