@@ -74,8 +74,9 @@ impl Default for PidData {
     }
 }
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum State {
+#[derive(Default, Debug, Copy, Clone)]
+pub enum CoffeeState {
+    #[default]
     Idle,
     CoffeeHeating,
     Ready,
@@ -125,12 +126,37 @@ impl Default for Interface {
     }
 }
 
+#[derive(Default, Debug, Copy, Clone)]
 pub enum ValveState {
+    #[default]
     Closed,
     Open,
 }
 
+#[derive(Default, Debug, Copy, Clone)]
 pub enum PumpState {
+    #[default]
     Off,
     On(u16),
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+pub enum HeaterState {
+    #[default]
+    Off = 0,
+    HeatUp,
+    CoolDown,
+    SteadyState,
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+pub struct State {
+    pub coffee_state: CoffeeState,
+    pub pump_state: PumpState,
+    pub heater_1_state: HeaterState,
+    pub heater_2_state: HeaterState,
+    pub heater_bg_state: HeaterState,
+    pub gate_valve_state: bool,
+    pub valve_1_state: ValveState,
+    pub valve_2_state: ValveState,
 }
