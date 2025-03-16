@@ -92,19 +92,26 @@ fn main() -> ! {
         .pclk2(24.MHz())
         .freeze();
 
-    // TODO check if TIM4 actually works, before it was TIM5
-    let mut tick_timer = dp.TIM4.counter_ms(&clocks);
-    tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
-
-    let mut delay = dp.TIM1.delay_us(&clocks);
-    delay.delay(100.millis()); // apparently required for USB to set up properly...
-
     // initialize ports
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
     let gpioc = dp.GPIOC.split();
     let gpiod = dp.GPIOD.split();
     let gpioe = dp.GPIOE.split();
+
+    // initialize leds
+    let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
+    let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
+    let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
+
+    // TODO check if TIM4 actually works, before it was TIM5
+    let mut tick_timer = dp.TIM4.counter_ms(&clocks);
+    // tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
+
+    stat_led.on();
+
+    let mut delay = dp.TIM1.delay_us(&clocks);
+    delay.delay(100.millis()); // apparently required for USB to set up properly...
 
     // initialize DMA
     let dma2 = StreamsTuple::new(dp.DMA2);
@@ -135,11 +142,6 @@ fn main() -> ! {
     enc_pin_b.make_interrupt_source(&mut syscfg);
     enc_pin_b.trigger_on_edge(&mut dp.EXTI, Edge::RisingFalling);
     enc_pin_b.enable_interrupt(&mut dp.EXTI);
-
-    // initialize leds
-    let mut stat_led = LED::new(gpioe.pe2.into_push_pull_output());
-    let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
-    let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
     // initialize button
     let button = gpiob.pb0.into_floating_input();
@@ -295,7 +297,7 @@ fn main() -> ! {
     let state_container = Arc::new(Mutex::new(state).expect("Failed to create data guard mutex"));
     let state_container_main = state_container.clone();
     let state_container_usb = state_container.clone();
-    let _state_container_pid = state_container;
+    let state_container_pid = state_container;
 
     let measured_data = MeasuredData::default();
     let measured_data_container =
@@ -437,7 +439,7 @@ fn main() -> ! {
 
     Task::new()
         .name("PID TASK")
-        .stack_size(512)
+        .stack_size(1024)
         .priority(TaskPriority(1))
         .start(move || {
             let mut heater_1_pid = PID::new();
@@ -471,6 +473,13 @@ fn main() -> ! {
                     heater_bg_pwm.set_duty(Channel::C3, 0);
                     fault_2_led.off();
                     break;
+                }
+
+                if let Ok( state_temp) = state_container_pid.lock(Duration::ms(5)) {
+                    state.pump_state = state_temp.pump_state.clone();
+                    state.coffee_state = state_temp.coffee_state.clone();
+                    state.valve_1_state = state_temp.valve_1_state.clone();
+                    state.valve_2_state = state_temp.valve_2_state.clone();
                 }
 
                 mav_1_counter += 1;
@@ -863,6 +872,10 @@ fn main() -> ! {
                     }
                 }
 
+                if let Ok(mut state_temp) = state_container_pid.lock(Duration::ms(5)) {
+                    *state_temp = state.clone();
+                }
+
                 CurrentTask::delay(Duration::ms(heater_1_pid.window_size));
             }
         })
@@ -1030,7 +1043,7 @@ fn main() -> ! {
 
     Task::new()
         .name("USB TASK")
-        .stack_size(1024)
+        .stack_size(2048)
         .priority(TaskPriority(3))
         .start(move || {
             let mut temperature_data = MeasuredData::default();
@@ -1123,7 +1136,7 @@ fn main() -> ! {
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            let mut extraction_time = 20 * main_task_period;
+            let mut extraction_time = 20;
 
             let mut valve_1_override = None;
             let mut valve_2_override = None;
@@ -1265,8 +1278,8 @@ fn main() -> ! {
                                 previous_kd = pid_data_temp.kd;
                                 previous_target = pid_data_temp.target;
                                 // increase p value for extraction!
-                                pid_data_temp.kp *= 2.0;
-                                pid_data_temp.target += 2.0;
+                                // pid_data_temp.kp *= 2.0;
+                                // pid_data_temp.target += 2.0;
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
@@ -1303,8 +1316,8 @@ fn main() -> ! {
 
                         led_state = LedState::FastBlink;
 
-                        // timeout of 30s
-                        if timer >= extraction_time || lever.is_high() {
+                        // timeout
+                        if timer >= extraction_time || interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
