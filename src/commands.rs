@@ -4,7 +4,7 @@ use arrform::{arrform, ArrForm};
 use freertos_rust::{Duration, Queue};
 
 use crate::usb_println;
-use crate::utils::{CoffeeState, Interface, MeasuredData, PidData, PumpData, State};
+use crate::utils::{Interface, MeasuredData, PidData, PumpData, State};
 
 #[derive(Copy, Clone, Debug)]
 pub enum PumpCommand {
@@ -525,6 +525,6 @@ pub fn send_housekeeping(
         temperatures.t5.unwrap_or(0.0),
     );
     usb_println(hk.as_str());
-    let hk = arrform!(128, "[P] {:.2}", temperatures.p.unwrap_or(0.0));
+    let hk = arrform!(128, "[P] {:?}", temperatures.p);
     usb_println(hk.as_str());
 }

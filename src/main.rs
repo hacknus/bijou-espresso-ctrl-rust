@@ -255,6 +255,7 @@ fn main() -> ! {
 
     // init adc
     let pressure_sense_pin = gpioc.pc0.into_analog();
+    let current_sense_pin = gpioc.pc1.into_analog();
 
     let dma_config = DmaConfig::default()
         .transfer_complete_interrupt(true)
@@ -264,10 +265,12 @@ fn main() -> ! {
     let adc_config = AdcConfig::default()
         .dma(Dma::Continuous)
         .scan(Scan::Enabled);
+
     let mut adc = Adc::adc1(dp.ADC1, true, adc_config);
 
     adc.configure_channel(&Temperature, Sequence::One, SampleTime::Cycles_480);
     adc.configure_channel(&pressure_sense_pin, Sequence::Two, SampleTime::Cycles_480);
+    adc.configure_channel(&current_sense_pin, Sequence::Three, SampleTime::Cycles_480);
     adc.enable_temperature_and_vref();
 
     // let adc_buffer = cortex_m::singleton!(: [u16; 2] = [0; 2]).unwrap();
