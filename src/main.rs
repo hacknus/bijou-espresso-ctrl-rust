@@ -475,7 +475,7 @@ fn main() -> ! {
                     break;
                 }
 
-                if let Ok( state_temp) = state_container_pid.lock(Duration::ms(5)) {
+                if let Ok(state_temp) = state_container_pid.lock(Duration::ms(5)) {
                     state.pump_state = state_temp.pump_state.clone();
                     state.coffee_state = state_temp.coffee_state.clone();
                     state.valve_1_state = state_temp.valve_1_state.clone();
@@ -1261,10 +1261,25 @@ fn main() -> ! {
                         pid_bg_data.target = 85.0;
                         led_state = LedState::SlowSine;
 
-                        if state.heater_1_state == HeaterState::SteadyState
+                        if interface.lever_switch && !water_low {
+                            if let Ok(mut pid_data_temp) =
+                                pid_1_data_container_main.lock(Duration::ms(5))
+                            {
+                                previous_kp = pid_data_temp.kp;
+                                previous_ki = pid_data_temp.ki;
+                                previous_kd = pid_data_temp.kd;
+                                previous_target = pid_data_temp.target;
+
+                                state.pump_state = PumpState::On(
+                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
+                                );
+                            }
+                        } else if state.heater_1_state == HeaterState::SteadyState
                             && state.heater_bg_state == HeaterState::SteadyState
                         {
                             state.coffee_state = CoffeeState::Ready;
+                        } else {
+                            state.pump_state = PumpState::Off;
                         }
                     }
                     CoffeeState::Ready => {
@@ -1283,8 +1298,7 @@ fn main() -> ! {
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
-                        }
-                        if state.heater_1_state != HeaterState::SteadyState
+                        } else if state.heater_1_state != HeaterState::SteadyState
                             || state.heater_bg_state != HeaterState::SteadyState
                         {
                             state.coffee_state = CoffeeState::CoffeeHeating;
@@ -1309,15 +1323,12 @@ fn main() -> ! {
                         state.pump_state =
                             PumpState::On((max_duty as f32 * (pump.extract_power / 100.0)) as u16);
 
-                        // TODO: we need to set duty cycle to a high value for heating during extraction!
-
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::FastBlink;
 
-                        // timeout
-                        if timer >= extraction_time || interface.lever_switch {
+                        if timer >= extraction_time || !interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
@@ -1326,7 +1337,13 @@ fn main() -> ! {
                                 pid_data_temp.kd = previous_kd;
                                 pid_data_temp.target = previous_target;
                             }
-                            state.coffee_state = CoffeeState::Ready;
+                            if state.heater_1_state == HeaterState::SteadyState
+                                && state.heater_bg_state == HeaterState::SteadyState
+                            {
+                                state.coffee_state = CoffeeState::Ready;
+                            } else {
+                                state.coffee_state = CoffeeState::CoffeeHeating;
+                            }
                         }
                     }
                     CoffeeState::SteamHeating => {

@@ -41,7 +41,7 @@ pub fn read_pressure() -> Option<f32> {
     usb_println(arrform!(64, "Pressure Voltage: {:}", voltage).as_str());
 
     if (0.5..=4.5).contains(&voltage) {
-        Some((voltage - 0.5) * 12.0 / 4.0)
+        Some((voltage - 0.5) * 1.2 / 4.0 * 10.0)
     } else {
         None
     }
