@@ -38,7 +38,7 @@ pub fn read_pressure() -> Option<f32> {
     });
     // transform to pressure according to datasheet:
     // https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/2247/114991178_Web.pdf
-    usb_println(arrform!(64, "Pressure Voltage: {:}", voltage).as_str());
+    // usb_println(arrform!(64, "Pressure Voltage: {:}", voltage).as_str());
 
     if (0.5..=4.5).contains(&voltage) {
         Some((voltage - 0.5) * 12.0 / 4.0)
