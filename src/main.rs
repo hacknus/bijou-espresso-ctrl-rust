@@ -202,6 +202,7 @@ fn main() -> ! {
     unsafe {
         usb_init(usb);
         cortex_m::peripheral::NVIC::unmask(Interrupt::OTG_FS);
+        cortex_m::peripheral::NVIC::unmask(Interrupt::DMA2_STREAM0);
         cortex_m::peripheral::NVIC::unmask(enc_pin_b.interrupt());
     }
     // Now that button is configured, move button into global context
