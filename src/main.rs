@@ -44,15 +44,18 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 
 use crate::commands::{
-    extract_command, send_housekeeping, HeaterCommand, PumpCommand, ValveCommand,
+    extract_command, send_housekeeping, ConfigCommand, HeaterCommand, PumpCommand, ValveCommand,
 };
+use crate::config::ConfigManager;
 use crate::devices::led::LED;
 use crate::devices::max31865::Wires;
 use crate::devices::max31865::MAX31865;
 use crate::devices::pressure_sense::{read_pressure, ADC_MEMORY, G_XFR};
+use crate::devices::w25q32::FLASH_SPI_MODE;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::mav::Mav;
 use crate::pid::{PID, STEADY_STATE_BOUNDS};
+use crate::tasks::flash_task::{load_all_config, save_all_config};
 use crate::usb::{usb_init, usb_println, usb_read};
 use crate::utils::{
     CoffeeState, HeaterState, Interface, LedState, MeasuredData, PidData, PumpData, PumpState,
@@ -60,10 +63,12 @@ use crate::utils::{
 };
 
 mod commands;
+mod config;
 mod devices;
 mod intrpt;
 mod mav;
 mod pid;
+mod tasks;
 mod usb;
 mod utils;
 
@@ -239,13 +244,26 @@ fn main() -> ! {
         .into_buffered_graphics_mode();
     display.init().unwrap();
 
-    let sclk = gpiob.pb13;
-    let sdo = gpiob.pb14;
-    let sdi = gpiob.pb15;
+    // Initialize SPI1 for the flash memory
+    let sck_1 = gpioa.pa5;
+    let miso_1 = gpioa.pa6;
+    let mosi_1 = gpioa.pa7;
+    let cs_flash = gpioa.pa4.into_push_pull_output();
+
+    // Initialize SPI1
+    let spi1 = dp
+        .SPI1
+        .spi((sck_1, miso_1, mosi_1), FLASH_SPI_MODE, 10.kHz(), &clocks);
+
+    let spi1_bus = shared_bus::BusManagerSimple::new(spi1);
+
+    let sclk_2 = gpiob.pb13;
+    let sdo_2 = gpiob.pb14;
+    let sdi_2 = gpiob.pb15;
 
     // initialize spi
-    let spi = dp.SPI2.spi(
-        (sclk, sdo, sdi),
+    let spi2 = dp.SPI2.spi(
+        (sclk_2, sdo_2, sdi_2),
         spiMode {
             polarity: Polarity::IdleHigh,
             phase: Phase::CaptureOnSecondTransition,
@@ -254,7 +272,7 @@ fn main() -> ! {
         &clocks,
     );
 
-    let spi_bus = shared_bus::BusManagerSimple::new(spi);
+    let spi2_bus = shared_bus::BusManagerSimple::new(spi2);
 
     // init adc
     let pressure_sense_pin = gpioc.pc0.into_analog();
@@ -317,6 +335,7 @@ fn main() -> ! {
     let _pid_data_1_container_display = pid_data_1_container.clone();
     let pid_1_data_container_pid_1 = pid_data_1_container.clone();
     let pid_1_data_container_main = pid_data_1_container.clone();
+    let pid_1_data_container_task = pid_data_1_container.clone();
     let pid_1_data_container_usb = pid_data_1_container;
 
     let pid_data_2 = PidData::default();
@@ -325,6 +344,7 @@ fn main() -> ! {
     let _pid_data_2_container_display = pid_data_2_container.clone();
     let pid_2_data_container_pid_2 = pid_data_2_container.clone();
     let pid_2_data_container_main = pid_data_2_container.clone();
+    let pid_2_data_container_task = pid_data_2_container.clone();
     let pid_2_data_container_usb = pid_data_2_container;
 
     let pid_data_bg = PidData::default();
@@ -333,6 +353,7 @@ fn main() -> ! {
     let _pid_data_bg_container_display = pid_data_bg_container.clone();
     let pid_bg_data_container_pid_bg = pid_data_bg_container.clone();
     let pid_bg_data_container_main = pid_data_bg_container.clone();
+    let pid_bg_data_container_task = pid_data_bg_container.clone();
     let pid_bg_data_container_usb = pid_data_bg_container;
 
     let interface = Interface::default();
@@ -340,6 +361,7 @@ fn main() -> ! {
         Arc::new(Mutex::new(interface).expect("Failed to create data guard mutex"));
     let _interface_data_container_display = interface_data_container.clone();
     let interface_data_container_main = interface_data_container.clone();
+    let interface_data_container_task = interface_data_container.clone();
     let interface_data_container_usb = interface_data_container;
 
     let pump = PumpData::default();
@@ -347,7 +369,12 @@ fn main() -> ! {
         Arc::new(Mutex::new(pump).expect("Failed to create data guard mutex"));
     let _pump_data_container_display = pump_data_container.clone();
     let pump_data_container_main = pump_data_container.clone();
+    let pump_data_container_task = pump_data_container.clone();
     let pump_data_container_usb = pump_data_container;
+
+    let config_command_queue = Arc::new(Queue::new(10).unwrap());
+    let config_command_queue_task = config_command_queue.clone();
+    let config_command_queue_usb = config_command_queue;
 
     let pump_command_queue = Arc::new(Queue::new(10).unwrap());
     let pump_command_queue_main = pump_command_queue.clone();
@@ -380,11 +407,11 @@ fn main() -> ! {
         .stack_size(1024)
         .priority(TaskPriority(4))
         .start(move || {
-            let mut max31865_1 = MAX31865::new(spi_bus.acquire_spi(), cs_1, Wires::TwoWire);
-            let mut max31865_2 = MAX31865::new(spi_bus.acquire_spi(), cs_2, Wires::TwoWire);
-            let mut max31865_3 = MAX31865::new(spi_bus.acquire_spi(), cs_3, Wires::TwoWire);
-            let mut max31865_4 = MAX31865::new(spi_bus.acquire_spi(), cs_4, Wires::TwoWire);
-            let mut max31865_5 = MAX31865::new(spi_bus.acquire_spi(), cs_5, Wires::TwoWire);
+            let mut max31865_1 = MAX31865::new(spi2_bus.acquire_spi(), cs_1, Wires::TwoWire);
+            let mut max31865_2 = MAX31865::new(spi2_bus.acquire_spi(), cs_2, Wires::TwoWire);
+            let mut max31865_3 = MAX31865::new(spi2_bus.acquire_spi(), cs_3, Wires::TwoWire);
+            let mut max31865_4 = MAX31865::new(spi2_bus.acquire_spi(), cs_4, Wires::TwoWire);
+            let mut max31865_5 = MAX31865::new(spi2_bus.acquire_spi(), cs_5, Wires::TwoWire);
 
             let max31865_1_state = max31865_1.init();
             let max31865_2_state = max31865_2.init();
@@ -434,6 +461,144 @@ fn main() -> ! {
                     measured_data.p = pressure;
                 }
                 CurrentTask::delay(Duration::ms(100));
+            }
+        })
+        .unwrap();
+
+    Task::new()
+        .name("CONFIG TASK")
+        .stack_size(1024)
+        .priority(TaskPriority(1))
+        .start(move || {
+            let mut config_manager = ConfigManager::new(spi1_bus.acquire_spi(), cs_flash).unwrap();
+
+            usb_println("Config task started");
+
+            // !!! only do this the first time after flashing:
+            let _ = save_all_config(
+                &mut config_manager,
+                &pid_1_data_container_task,
+                &pid_2_data_container_task,
+                &pid_bg_data_container_task,
+                &pump_data_container_task,
+                &interface_data_container_task,
+            );
+
+            // Load configuration on startup
+            let _ = load_all_config(
+                &mut config_manager,
+                &pid_1_data_container_task,
+                &pid_2_data_container_task,
+                &pid_bg_data_container_task,
+                &pump_data_container_task,
+                &interface_data_container_task,
+            );
+
+            loop {
+                // Wait for commands
+                if let Ok(cmd) = config_command_queue_task.receive(Duration::infinite()) {
+                    // wait for the data to be distributed amongst the tasks in the mutex and then save it
+                    CurrentTask::delay(Duration::ms(1000));
+
+                    match cmd {
+                        ConfigCommand::LoadAll => {
+                            let _ = load_all_config(
+                                &mut config_manager,
+                                &pid_1_data_container_task,
+                                &pid_2_data_container_task,
+                                &pid_bg_data_container_task,
+                                &pump_data_container_task,
+                                &interface_data_container_task,
+                            );
+                        }
+                        ConfigCommand::SaveAll => {
+                            let _ = save_all_config(
+                                &mut config_manager,
+                                &pid_1_data_container_task,
+                                &pid_2_data_container_task,
+                                &pid_bg_data_container_task,
+                                &pump_data_container_task,
+                                &interface_data_container_task,
+                            );
+                        }
+                        ConfigCommand::LoadPid => {
+                            if let (Ok(mut pid_1), Ok(mut pid_2), Ok(mut pid_bg)) = (
+                                pid_1_data_container_task.lock(Duration::ms(5)),
+                                pid_2_data_container_task.lock(Duration::ms(5)),
+                                pid_bg_data_container_task.lock(Duration::ms(5)),
+                            ) {
+                                match config_manager.apply_to_pid_data(
+                                    &mut pid_1,
+                                    &mut pid_2,
+                                    &mut pid_bg,
+                                ) {
+                                    Ok(_) => usb_println("PID configuration loaded"),
+                                    Err(e) => usb_println("Failed to load PID configuration"),
+                                };
+                            } else {
+                                usb_println("Failed to lock PID data containers");
+                            }
+                        }
+                        ConfigCommand::SavePid => {
+                            if let (Ok(pid_1), Ok(pid_2), Ok(pid_bg)) = (
+                                pid_1_data_container_task.lock(Duration::ms(5)),
+                                pid_2_data_container_task.lock(Duration::ms(5)),
+                                pid_bg_data_container_task.lock(Duration::ms(5)),
+                            ) {
+                                match config_manager.update_from_pid_data(&pid_1, &pid_2, &pid_bg) {
+                                    Ok(_) => usb_println("PID configuration saved"),
+                                    Err(e) => usb_println("Failed to save PID configuration"),
+                                };
+                            } else {
+                                usb_println("Failed to lock PID data containers");
+                            }
+                        }
+                        ConfigCommand::LoadPump => {
+                            if let Ok(mut pump) = pump_data_container_task.lock(Duration::ms(5)) {
+                                match config_manager.apply_to_pump_data(&mut pump) {
+                                    Ok(_) => usb_println("Pump configuration loaded"),
+                                    Err(e) => usb_println("Failed to load pump configuration"),
+                                };
+                            } else {
+                                usb_println("Failed to lock pump data container");
+                            }
+                        }
+                        ConfigCommand::SavePump => {
+                            if let Ok(pump) = pump_data_container_task.lock(Duration::ms(5)) {
+                                match config_manager.update_from_pump_data(&pump) {
+                                    Ok(_) => usb_println("Pump configuration saved"),
+                                    Err(e) => usb_println("Failed to save pump configuration"),
+                                };
+                            } else {
+                                usb_println("Failed to lock pump data container");
+                            }
+                        }
+                        ConfigCommand::LoadInterface => {
+                            if let Ok(mut interface) =
+                                interface_data_container_task.lock(Duration::ms(5))
+                            {
+                                match config_manager.apply_to_interface(&mut interface) {
+                                    Ok(_) => usb_println("Interface configuration loaded"),
+                                    Err(e) => usb_println("Failed to load interface configuration"),
+                                };
+                            } else {
+                                usb_println("Failed to lock interface data container");
+                            }
+                        }
+                        ConfigCommand::SaveInterface => {
+                            if let Ok(interface) =
+                                interface_data_container_task.lock(Duration::ms(5))
+                            {
+                                match config_manager.update_from_interface(&interface) {
+                                    Ok(_) => usb_println("Interface configuration saved"),
+                                    Err(e) => usb_println("Failed to save interface configuration"),
+                                };
+                            } else {
+                                usb_println("Failed to lock interface data container");
+                            }
+                        }
+                    }
+                }
             }
         })
         .unwrap();
@@ -1107,6 +1272,7 @@ fn main() -> ! {
                         &heater_bg_command_queue_usb,
                         &pump_command_queue_usb,
                         &valve_command_queue_usb,
+                        &config_command_queue_usb,
                         &mut hk,
                         &mut hk_rate,
                     );

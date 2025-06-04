@@ -6,6 +6,19 @@ use freertos_rust::{Duration, Queue};
 use crate::usb_println;
 use crate::utils::{Interface, MeasuredData, PidData, PumpData, State};
 
+// Commands for the config task
+#[derive(Debug, Clone, Copy)]
+pub enum ConfigCommand {
+    LoadAll,
+    SaveAll,
+    LoadPid,
+    SavePid,
+    LoadPump,
+    SavePump,
+    LoadInterface,
+    SaveInterface,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum PumpCommand {
     PumpOverride(Option<bool>),
@@ -61,6 +74,7 @@ pub fn extract_command(
     heater_bg_command_queue: &Arc<Queue<HeaterCommand>>,
     pump_command_queue: &Arc<Queue<PumpCommand>>,
     valve_command_queue: &Arc<Queue<ValveCommand>>,
+    config_command_queue: &Arc<Queue<ConfigCommand>>,
     hk: &mut bool,
     hk_period: &mut f32,
 ) {
@@ -75,9 +89,9 @@ pub fn extract_command(
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
-                    heater_2_command_queue
+                    config_command_queue
                         .send(
-                            HeaterCommand::Temperature(val - 5.0),
+                            ConfigCommand::SaveInterface,
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
@@ -105,6 +119,9 @@ pub fn extract_command(
                     heater_1_command_queue
                         .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID1 p value = {}", val)
                 }
             }
@@ -114,6 +131,9 @@ pub fn extract_command(
                 Some(val) => {
                     heater_1_command_queue
                         .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID1 i value = {}", val)
                 }
@@ -125,6 +145,9 @@ pub fn extract_command(
                     heater_1_command_queue
                         .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID1 d value = {}", val)
                 }
             }
@@ -134,6 +157,9 @@ pub fn extract_command(
                 Some(val) => {
                     heater_2_command_queue
                         .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID2 p value = {}", val)
                 }
@@ -145,6 +171,9 @@ pub fn extract_command(
                     heater_2_command_queue
                         .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID2 i value = {}", val)
                 }
             }
@@ -154,6 +183,9 @@ pub fn extract_command(
                 Some(val) => {
                     heater_2_command_queue
                         .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID2 d value = {}", val)
                 }
@@ -165,6 +197,9 @@ pub fn extract_command(
                     heater_bg_command_queue
                         .send(HeaterCommand::PidP(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID BG p value = {}", val)
                 }
             }
@@ -175,6 +210,9 @@ pub fn extract_command(
                     heater_bg_command_queue
                         .send(HeaterCommand::PidI(val), Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID BG i value = {}", val)
                 }
             }
@@ -184,6 +222,9 @@ pub fn extract_command(
                 Some(val) => {
                     heater_bg_command_queue
                         .send(HeaterCommand::PidD(val), Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID BG d value = {}", val)
                 }
@@ -198,6 +239,9 @@ pub fn extract_command(
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set window size = {} ms", val)
                 }
             }
@@ -210,6 +254,9 @@ pub fn extract_command(
                             HeaterCommand::PidMaxVal(val),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
+                        .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePid, Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                     arrform!(64, "[ACK] cmd OK, set PID max value = {}", val)
                 }
@@ -224,6 +271,9 @@ pub fn extract_command(
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePump, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set pump coffee power = {}", val)
                 }
             }
@@ -236,6 +286,9 @@ pub fn extract_command(
                             PumpCommand::PumpSteamPower(val as i16),
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
+                        .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePump, Duration::ms(CMD_QUEUE_TIMEOUT))
                         .unwrap();
                     arrform!(64, "[ACK] cmd OK, set pump steam power = {}", val)
                 }
@@ -250,22 +303,14 @@ pub fn extract_command(
                             Duration::ms(CMD_QUEUE_TIMEOUT),
                         )
                         .unwrap();
+                    config_command_queue
+                        .send(ConfigCommand::SavePump, Duration::ms(CMD_QUEUE_TIMEOUT))
+                        .unwrap();
                     arrform!(64, "[ACK] cmd OK, set pump pre-infuse power = {}", val)
                 }
             }
         } else if cmd.contains("[CMD] setPumpHeatUpPower=") {
-            match extract_value(cmd) {
-                None => cmd_has_no_value(),
-                Some(val) => {
-                    pump_command_queue
-                        .send(
-                            PumpCommand::PumpHeatUpPower(val as i16),
-                            Duration::ms(CMD_QUEUE_TIMEOUT),
-                        )
-                        .unwrap();
-                    arrform!(64, "[ACK] cmd OK, set pump heat up cycling power = {}", val)
-                }
-            }
+            cmd_invalid()
         } else if cmd.contains("[CMD] OverrideValve1=Open") {
             valve_command_queue
                 .send(
