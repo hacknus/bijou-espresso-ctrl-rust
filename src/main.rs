@@ -1425,7 +1425,10 @@ fn main() -> ! {
                     CoffeeState::CoffeeHeating => {
                         pid_1_data.enable = true;
                         pid_bg_data.enable = true;
-                        pid_bg_data.target = 85.0;
+
+                        pid_bg_data.target = interface.brew_head_temperature;
+                        pid_1_data.target = interface.coffee_temperature;
+
                         led_state = LedState::SlowSine;
 
                         if interface.lever_switch && !water_low {
@@ -1472,6 +1475,12 @@ fn main() -> ! {
                         }
                     }
                     CoffeeState::PreInfuse => {
+                        pid_1_data.enable = true;
+                        pid_bg_data.enable = true;
+
+                        pid_bg_data.target = interface.brew_head_temperature;
+                        pid_1_data.target = interface.coffee_temperature;
+
                         state.pump_state = PumpState::On(
                             (max_duty as f32 * (pump.pre_infuse_power / 100.0)) as u16,
                         );
@@ -1480,13 +1489,19 @@ fn main() -> ! {
                         state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::SlowBlink;
-                        // timer of 2.5s
-                        if timer >= 5 {
+                        // timer of 5s
+                        if timer >= 10 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
                         }
                     }
                     CoffeeState::Extracting => {
+                        pid_1_data.enable = true;
+                        pid_bg_data.enable = true;
+
+                        pid_bg_data.target = interface.brew_head_temperature;
+                        pid_1_data.target = interface.coffee_temperature;
+
                         state.pump_state =
                             PumpState::On((max_duty as f32 * (pump.extract_power / 100.0)) as u16);
 
@@ -1514,6 +1529,12 @@ fn main() -> ! {
                         }
                     }
                     CoffeeState::SteamHeating => {
+                        pid_1_data.enable = true;
+                        pid_2_data.enable = true;
+
+                        pid_1_data.target = interface.coffee_temperature;
+                        pid_2_data.target = interface.steam_temperature;
+
                         state.pump_state = PumpState::Off;
 
                         state.valve_1_state = ValveState::Closed;
@@ -1527,6 +1548,12 @@ fn main() -> ! {
                         }
                     }
                     CoffeeState::Steaming => {
+                        pid_1_data.enable = true;
+                        pid_2_data.enable = true;
+
+                        pid_1_data.target = interface.coffee_temperature;
+                        pid_2_data.target = interface.steam_temperature;
+
                         state.pump_state =
                             PumpState::On((max_duty as f32 * (pump.steam_power / 100.0)) as u16);
 

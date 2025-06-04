@@ -22,7 +22,7 @@ impl Default for PumpData {
     fn default() -> Self {
         PumpData {
             heat_up_power: 15.0,
-            pre_infuse_power: 15.0,
+            pre_infuse_power: 25.0,
             steam_power: 10.0,
             extract_power: 50.0,
             extraction_timeout: 20000.0,
@@ -113,7 +113,7 @@ impl Default for Interface {
     fn default() -> Self {
         Interface {
             coffee_temperature: 95.0,
-            brew_head_temperature: 70.0,
+            brew_head_temperature: 95.0,
             steam_temperature: 120.0,
             trigger_extraction: false,
             lever_switch: false,
