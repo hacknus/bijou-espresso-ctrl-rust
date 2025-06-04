@@ -652,20 +652,22 @@ fn main() -> ! {
                 mav_2_counter += 1;
                 mav_bg_counter += 1;
 
-                if let Ok(cmd) = heater_1_command_queue_pid_1.receive(Duration::ms(5)) {
-                    match cmd {
-                        HeaterCommand::Temperature(temperature) => {
-                            heater_1_pid.target = temperature
+                if let Ok(mut pid_temp) = pid_1_data_container_pid_1.lock(Duration::ms(10)) {
+                    if let Ok(cmd) = heater_1_command_queue_pid_1.receive(Duration::ms(5)) {
+                        match cmd {
+                            HeaterCommand::Temperature(temperature) => {
+                                pid_temp.target = temperature;
+                            }
+                            HeaterCommand::Heating(enable) => pid_temp.enable = enable,
+                            HeaterCommand::WindowSize(window_size) => {
+                                pid_temp.window_size = window_size as u32;
+                            }
+                            HeaterCommand::PidP(kp) => pid_temp.kp = kp,
+                            HeaterCommand::PidI(ki) => pid_temp.ki = ki,
+                            HeaterCommand::PidD(kd) => pid_temp.kd = kd,
+                            HeaterCommand::PidMaxVal(max_val) => pid_temp.max_val = max_val,
+                            HeaterCommand::Boiler1(boiler_1) => heater_1_boiler_override = boiler_1,
                         }
-                        HeaterCommand::Heating(enable) => heater_1_pid.enabled = enable,
-                        HeaterCommand::WindowSize(window_size) => {
-                            heater_1_pid.window_size = window_size as u32;
-                        }
-                        HeaterCommand::PidP(kp) => heater_1_pid.kp = kp,
-                        HeaterCommand::PidI(ki) => heater_1_pid.ki = ki,
-                        HeaterCommand::PidD(kd) => heater_1_pid.kd = kd,
-                        HeaterCommand::PidMaxVal(max_val) => heater_1_pid.max_val = max_val,
-                        HeaterCommand::Boiler1(boiler_1) => heater_1_boiler_override = boiler_1,
                     }
                 }
 
@@ -778,21 +780,22 @@ fn main() -> ! {
                         }
                     }
                 }
-
-                if let Ok(cmd) = heater_2_command_queue_pid_2.receive(Duration::ms(5)) {
-                    match cmd {
-                        HeaterCommand::Temperature(temperature) => {
-                            heater_2_pid.target = temperature
+                if let Ok(mut pid_temp) = pid_2_data_container_pid_2.lock(Duration::ms(10)) {
+                    if let Ok(cmd) = heater_2_command_queue_pid_2.receive(Duration::ms(5)) {
+                        match cmd {
+                            HeaterCommand::Temperature(temperature) => {
+                                pid_temp.target = temperature
+                            }
+                            HeaterCommand::Heating(enable) => pid_temp.enable = enable,
+                            HeaterCommand::WindowSize(window_size) => {
+                                pid_temp.window_size = window_size as u32;
+                            }
+                            HeaterCommand::PidP(kp) => pid_temp.kp = kp,
+                            HeaterCommand::PidI(ki) => pid_temp.ki = ki,
+                            HeaterCommand::PidD(kd) => pid_temp.kd = kd,
+                            HeaterCommand::PidMaxVal(max_val) => pid_temp.max_val = max_val,
+                            HeaterCommand::Boiler1(boiler_1) => heater_2_boiler_override = boiler_1,
                         }
-                        HeaterCommand::Heating(enable) => heater_2_pid.enabled = enable,
-                        HeaterCommand::WindowSize(window_size) => {
-                            heater_2_pid.window_size = window_size as u32;
-                        }
-                        HeaterCommand::PidP(kp) => heater_2_pid.kp = kp,
-                        HeaterCommand::PidI(ki) => heater_2_pid.ki = ki,
-                        HeaterCommand::PidD(kd) => heater_2_pid.kd = kd,
-                        HeaterCommand::PidMaxVal(max_val) => heater_2_pid.max_val = max_val,
-                        HeaterCommand::Boiler1(boiler_1) => heater_2_boiler_override = boiler_1,
                     }
                 }
 
@@ -906,21 +909,24 @@ fn main() -> ! {
                         }
                     }
                 }
-
-                if let Ok(cmd) = heater_bg_command_queue_pid_bg.receive(Duration::ms(5)) {
-                    match cmd {
-                        HeaterCommand::Temperature(temperature) => {
-                            heater_bg_pid.target = temperature
+                if let Ok(mut pid_temp) = pid_bg_data_container_pid_bg.lock(Duration::ms(10)) {
+                    if let Ok(cmd) = heater_bg_command_queue_pid_bg.receive(Duration::ms(5)) {
+                        match cmd {
+                            HeaterCommand::Temperature(temperature) => {
+                                pid_temp.target = temperature
+                            }
+                            HeaterCommand::Heating(enable) => pid_temp.enable = enable,
+                            HeaterCommand::WindowSize(window_size) => {
+                                pid_temp.window_size = window_size as u32;
+                            }
+                            HeaterCommand::PidP(kp) => pid_temp.kp = kp,
+                            HeaterCommand::PidI(ki) => pid_temp.ki = ki,
+                            HeaterCommand::PidD(kd) => pid_temp.kd = kd,
+                            HeaterCommand::PidMaxVal(max_val) => pid_temp.max_val = max_val,
+                            HeaterCommand::Boiler1(boiler_1) => {
+                                heater_bg_boiler_override = boiler_1
+                            }
                         }
-                        HeaterCommand::Heating(enable) => heater_bg_pid.enabled = enable,
-                        HeaterCommand::WindowSize(window_size) => {
-                            heater_bg_pid.window_size = window_size as u32;
-                        }
-                        HeaterCommand::PidP(kp) => heater_bg_pid.kp = kp,
-                        HeaterCommand::PidI(ki) => heater_bg_pid.ki = ki,
-                        HeaterCommand::PidD(kd) => heater_bg_pid.kd = kd,
-                        HeaterCommand::PidMaxVal(max_val) => heater_bg_pid.max_val = max_val,
-                        HeaterCommand::Boiler1(boiler_1) => heater_bg_boiler_override = boiler_1,
                     }
                 }
 
