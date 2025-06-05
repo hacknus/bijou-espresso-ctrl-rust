@@ -468,21 +468,21 @@ fn main() -> ! {
     Task::new()
         .name("CONFIG TASK")
         .stack_size(1024)
-        .priority(TaskPriority(1))
+        .priority(TaskPriority(3))
         .start(move || {
             let mut config_manager = ConfigManager::new(spi1_bus.acquire_spi(), cs_flash).unwrap();
 
             usb_println("Config task started");
 
             // !!! only do this the first time after flashing:
-            let _ = save_all_config(
-                &mut config_manager,
-                &pid_1_data_container_task,
-                &pid_2_data_container_task,
-                &pid_bg_data_container_task,
-                &pump_data_container_task,
-                &interface_data_container_task,
-            );
+            // let _ = save_all_config(
+            //     &mut config_manager,
+            //     &pid_1_data_container_task,
+            //     &pid_2_data_container_task,
+            //     &pid_bg_data_container_task,
+            //     &pump_data_container_task,
+            //     &interface_data_container_task,
+            // );
 
             // Load configuration on startup
             let _ = load_all_config(

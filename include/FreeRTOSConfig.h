@@ -98,7 +98,7 @@ extern void vAssertCalled( unsigned long ulLine, const char * const pcFileName )
 #define configTICK_RATE_HZ				( ( TickType_t ) 1000 ) //1000=1ms per tick, 100=10ms per tick
 #define configMAX_PRIORITIES			( 5 )
 #define configMINIMAL_STACK_SIZE		( ( unsigned short ) 128 )
-#define configTOTAL_HEAP_SIZE			( ( size_t ) ( 15 * 2048 ) ) // was 15
+#define configTOTAL_HEAP_SIZE			( ( size_t ) ( 17 * 2048 ) ) // was 15
 #define configMAX_TASK_NAME_LEN			( 16 )
 #define configUSE_TRACE_FACILITY		1
 #define configUSE_16_BIT_TICKS			0
