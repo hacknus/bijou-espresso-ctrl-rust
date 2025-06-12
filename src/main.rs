@@ -1469,8 +1469,9 @@ fn main() -> ! {
                                 previous_kd = pid_data_temp.kd;
                                 previous_target = pid_data_temp.target;
                                 // increase p value for extraction!
-                                // pid_data_temp.kp *= 2.0;
-                                // pid_data_temp.target += 2.0;
+                                pid_data_temp.kp *= 2.0;
+                                pid_data_temp.offset = 10.0;
+                                pid_data_temp.target += 2.0;
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
@@ -1523,6 +1524,7 @@ fn main() -> ! {
                                 pid_data_temp.kp = previous_kp;
                                 pid_data_temp.ki = previous_ki;
                                 pid_data_temp.kd = previous_kd;
+                                pid_data_temp.offset = 0.0;
                                 pid_data_temp.target = previous_target;
                             }
                             if state.heater_1_state == HeaterState::SteadyState

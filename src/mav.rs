@@ -1,4 +1,4 @@
-pub const MAV_LENGTH: usize = 24;
+pub const MAV_LENGTH: usize = 12;
 
 pub struct Mav {
     pub history: [f32; MAV_LENGTH],

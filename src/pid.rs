@@ -10,6 +10,7 @@ pub struct PID {
     pub kd: f32,
     pub val: f32,
     pub duty_cycle: f32,
+    pub offset: f32,
     error: f32,
     prev_time: f32,
     pub target: f32,
@@ -26,10 +27,11 @@ impl PID {
             i: 0.0,
             d: 0.0,
             kp: 1.0,
-            ki: 0.0,
+            ki: 0.1,
             kd: 2.0,
             val: 0.0,
             duty_cycle: 0.0,
+            offset: 0.0,
             error: 0.0,
             prev_time: 0.0,
             target: 95.0,
@@ -48,10 +50,10 @@ impl PID {
             self.i += self.ki * current_error / 1000.0; // scale factor of 1000 for convenience
         }
         self.d = self.kd * (current_error - self.error) / (now - self.prev_time);
-        self.d = self.d.clamp(-0.1, 0.1);
+        // self.d = self.d.clamp(-0.1, 0.1);
         self.error = current_error;
         self.prev_time = now;
-        self.val = self.p + self.i + self.d;
+        self.val = self.p + self.i + self.d + self.offset;
         self.val
     }
 
