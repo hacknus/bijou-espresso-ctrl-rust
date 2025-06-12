@@ -573,3 +573,35 @@ pub fn send_housekeeping(
     let hk = arrform!(128, "[P] {:?}", temperatures.p);
     usb_println(hk.as_str());
 }
+
+pub fn send_housekeeping_for_pid_tuning(
+    state: &State,
+    temperatures: &MeasuredData,
+    _interface: &Interface,
+    pid_1: &PidData,
+    pid_bg: &PidData,
+    _pump: &PumpData,
+    _msg: &str,
+) {
+    let hk = arrform!(
+        164,
+        "{:?}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}",
+        state.coffee_state,
+        temperatures.p.unwrap_or(0.0),
+        temperatures.t2.unwrap_or(0.0),
+        pid_1.target,
+        pid_1.p,
+        pid_1.i,
+        pid_1.d,
+        pid_1.pid_val,
+        pid_1.duty_cycle,
+        temperatures.t3.unwrap_or(0.0),
+        pid_bg.target,
+        pid_bg.p,
+        pid_bg.i,
+        pid_bg.d,
+        pid_bg.pid_val,
+        pid_bg.duty_cycle,
+    );
+    usb_println(hk.as_str());
+}

@@ -44,7 +44,8 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 
 use crate::commands::{
-    extract_command, send_housekeeping, ConfigCommand, HeaterCommand, PumpCommand, ValveCommand,
+    extract_command, send_housekeeping, send_housekeeping_for_pid_tuning, ConfigCommand,
+    HeaterCommand, PumpCommand, ValveCommand,
 };
 use crate::config::ConfigManager;
 use crate::devices::led::LED;
@@ -1259,11 +1260,21 @@ fn main() -> ! {
                     state = state_temp.clone();
                 }
 
-                send_housekeeping(
+                // send_housekeeping(
+                //     &state,
+                //     &temperature_data,
+                //     &interface,
+                //     &pid_1_data,
+                //     &pump,
+                //     "",
+                // );
+
+                send_housekeeping_for_pid_tuning(
                     &state,
                     &temperature_data,
                     &interface,
                     &pid_1_data,
+                    &pid_bg_data,
                     &pump,
                     "",
                 );
