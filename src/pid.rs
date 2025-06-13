@@ -35,7 +35,7 @@ impl PID {
             error: 0.0,
             prev_time: 0.0,
             target: 95.0,
-            window_size: 500,
+            window_size: 50,
             max_val: 100.0,
         }
     }
