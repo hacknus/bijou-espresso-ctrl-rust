@@ -1763,8 +1763,8 @@ fn main() -> ! {
                         CurrentTask::delay(Duration::ms(490));
                     }
                 }
-                count += 10;
-                CurrentTask::delay(Duration::ms(10));
+                count += 5;
+                CurrentTask::delay(Duration::ms(5));
             }
         })
         .unwrap();
