@@ -26,9 +26,9 @@ impl PID {
             p: 0.0,
             i: 0.0,
             d: 0.0,
-            kp: 1.0,
+            kp: 0.1,
             ki: 0.1,
-            kd: 2.0,
+            kd: 0.1,
             val: 0.0,
             duty_cycle: 0.0,
             offset: 0.0,
@@ -49,8 +49,9 @@ impl PID {
         if self.enabled && self.duty_cycle < 1.0 && self.duty_cycle > 0.0 {
             self.i += self.ki * current_error / 1000.0; // scale factor of 1000 for convenience
         }
-        self.d = self.kd * (current_error - self.error) / (now - self.prev_time);
-        // self.d = self.d.clamp(-0.1, 0.1);
+        if now != self.prev_time {
+            self.d = self.kd * (current_error - self.error) / (now - self.prev_time);
+        }
         self.error = current_error;
         self.prev_time = now;
         self.val = self.p + self.i + self.d + self.offset;

@@ -330,7 +330,8 @@ fn main() -> ! {
     let measured_data_container_pid_bg = measured_data_container.clone();
     let measured_data_container_usb = measured_data_container;
 
-    let pid_data_1 = PidData::default();
+    let mut pid_data_1 = PidData::default();
+    pid_data_1.kp = 0.05;
     let pid_data_1_container =
         Arc::new(Mutex::new(pid_data_1).expect("Failed to create data guard mutex"));
     let _pid_data_1_container_display = pid_data_1_container.clone();
@@ -476,14 +477,14 @@ fn main() -> ! {
             usb_println("Config task started");
 
             // !!! only do this the first time after flashing:
-            // let _ = save_all_config(
-            //     &mut config_manager,
-            //     &pid_1_data_container_task,
-            //     &pid_2_data_container_task,
-            //     &pid_bg_data_container_task,
-            //     &pump_data_container_task,
-            //     &interface_data_container_task,
-            // );
+            let _ = save_all_config(
+                &mut config_manager,
+                &pid_1_data_container_task,
+                &pid_2_data_container_task,
+                &pid_bg_data_container_task,
+                &pump_data_container_task,
+                &interface_data_container_task,
+            );
 
             // Load configuration on startup
             let _ = load_all_config(
@@ -678,6 +679,7 @@ fn main() -> ! {
                     heater_1_pid.kp = pid_temp.kp;
                     heater_1_pid.ki = pid_temp.ki;
                     heater_1_pid.kd = pid_temp.kd;
+                    heater_1_pid.offset = pid_temp.offset;
                     heater_1_pid.window_size = pid_temp.window_size;
                     heater_1_pid.max_val = pid_temp.max_val;
                     heater_1_pid.target = pid_temp.target;
@@ -723,7 +725,7 @@ fn main() -> ! {
                                     && mav_1.evaluate() <= STEADY_STATE_BOUNDS + heater_1_pid.target
                                     && heater_1_pid.target - STEADY_STATE_BOUNDS <= temperature
                                     && temperature <= STEADY_STATE_BOUNDS + heater_1_pid.target
-                                    && mav_1.spread() < STEADY_STATE_BOUNDS / 2.0
+                                    && mav_1.spread() < STEADY_STATE_BOUNDS
                                 {
                                     state.heater_1_state = HeaterState::SteadyState;
                                 }
@@ -852,7 +854,7 @@ fn main() -> ! {
                                     && mav_2.evaluate() <= STEADY_STATE_BOUNDS + heater_2_pid.target
                                     && heater_2_pid.target - STEADY_STATE_BOUNDS <= temperature
                                     && temperature <= STEADY_STATE_BOUNDS + heater_2_pid.target
-                                    && mav_2.spread() < STEADY_STATE_BOUNDS / 2.0
+                                    && mav_2.spread() < STEADY_STATE_BOUNDS
                                 {
                                     state.heater_2_state = HeaterState::SteadyState;
                                 }
@@ -983,7 +985,7 @@ fn main() -> ! {
                                         <= STEADY_STATE_BOUNDS + heater_bg_pid.target
                                     && heater_bg_pid.target - STEADY_STATE_BOUNDS <= temperature
                                     && temperature <= STEADY_STATE_BOUNDS + heater_bg_pid.target
-                                    && mav_bg.spread() < STEADY_STATE_BOUNDS / 2.0
+                                    && mav_bg.spread() < STEADY_STATE_BOUNDS
                                 {
                                     state.heater_bg_state = HeaterState::SteadyState;
                                 }
@@ -1480,8 +1482,8 @@ fn main() -> ! {
                                 previous_kd = pid_data_temp.kd;
                                 previous_target = pid_data_temp.target;
                                 // increase p value for extraction!
-                                pid_data_temp.kp *= 2.0;
-                                pid_data_temp.offset = 10.0;
+                                // pid_data_temp.kp *= 2.0;
+                                pid_data_temp.offset = 1.0;
                                 pid_data_temp.target += 2.0;
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
@@ -1508,9 +1510,17 @@ fn main() -> ! {
 
                         led_state = LedState::SlowBlink;
                         // timer of 5s
-                        if timer >= 10 {
+                        if timer >= 20 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
+
+                            if let Ok(mut pid_data_temp) =
+                                pid_1_data_container_main.lock(Duration::ms(5))
+                            {
+                                // increase p value for extraction!
+                                // pid_data_temp.kp *= 1.5;
+                                pid_data_temp.offset = 0.5;
+                            }
                         }
                     }
                     CoffeeState::Extracting => {
@@ -1536,6 +1546,7 @@ fn main() -> ! {
                                 pid_data_temp.ki = previous_ki;
                                 pid_data_temp.kd = previous_kd;
                                 pid_data_temp.offset = 0.0;
+                                pid_data_temp.reset_i = true;
                                 pid_data_temp.target = previous_target;
                             }
                             if state.heater_1_state == HeaterState::SteadyState

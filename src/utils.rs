@@ -22,9 +22,9 @@ impl Default for PumpData {
     fn default() -> Self {
         PumpData {
             heat_up_power: 15.0,
-            pre_infuse_power: 15.0,
+            pre_infuse_power: 20.0,
             steam_power: 10.0,
-            extract_power: 40.0,
+            extract_power: 35.0,
             extraction_timeout: 20000.0,
             enable: false,
         }
@@ -55,15 +55,15 @@ pub struct PidData {
 impl Default for PidData {
     fn default() -> Self {
         PidData {
-            target: 95.0,
+            target: 92.0,
             current_temperature: None,
             sensor: 0,
             p: 0.0,
             i: 0.0,
             d: 0.0,
-            kp: 1.0,
-            ki: 0.0,
-            kd: 2.0,
+            kp: 0.5,
+            ki: 1.0,
+            kd: 1.0,
             offset: 0.0,
             window_size: 50,
             max_val: 0.0,
@@ -115,7 +115,7 @@ impl Default for Interface {
     fn default() -> Self {
         Interface {
             coffee_temperature: 95.0,
-            brew_head_temperature: 95.0,
+            brew_head_temperature: 92.0,
             steam_temperature: 120.0,
             trigger_extraction: false,
             lever_switch: false,

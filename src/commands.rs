@@ -594,14 +594,14 @@ pub fn send_housekeeping_for_pid_tuning(
         pid_1.i,
         pid_1.d,
         pid_1.pid_val,
-        pid_1.duty_cycle,
+        pid_1.duty_cycle * 100.0,
         temperatures.t3.unwrap_or(0.0),
         pid_bg.target,
         pid_bg.p,
         pid_bg.i,
         pid_bg.d,
         pid_bg.pid_val,
-        pid_bg.duty_cycle,
+        pid_bg.duty_cycle * 100.0,
     );
     usb_println(hk.as_str());
 }
