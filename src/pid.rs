@@ -27,7 +27,7 @@ impl PID {
             i: 0.0,
             d: 0.0,
             kp: 0.1,
-            ki: 0.1,
+            ki: 0.025,
             kd: 0.1,
             val: 0.0,
             duty_cycle: 0.0,
@@ -54,7 +54,7 @@ impl PID {
         }
         self.error = current_error;
         self.prev_time = now;
-        self.val = self.p + self.i - self.d + self.offset;
+        self.val = self.p + self.i + self.d + self.offset;
         self.val
     }
 

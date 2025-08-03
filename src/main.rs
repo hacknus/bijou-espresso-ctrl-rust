@@ -332,7 +332,7 @@ fn main() -> ! {
 
     let mut pid_data_1 = PidData::default();
     pid_data_1.kp = 0.05;
-    pid_data_1.kd = 10.0;
+    pid_data_1.kd = 10000.0;
     let pid_data_1_container =
         Arc::new(Mutex::new(pid_data_1).expect("Failed to create data guard mutex"));
     let _pid_data_1_container_display = pid_data_1_container.clone();
