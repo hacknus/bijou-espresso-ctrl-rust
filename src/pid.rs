@@ -12,7 +12,7 @@ pub struct PID {
     pub duty_cycle: f32,
     pub offset: f32,
     error: f32,
-    prev_time: f32,
+    prev_time: u32,
     pub target: f32,
     pub window_size: u32,
     pub max_val: f32,
@@ -33,7 +33,7 @@ impl PID {
             duty_cycle: 0.0,
             offset: 0.0,
             error: 0.0,
-            prev_time: 0.0,
+            prev_time: 0,
             target: 95.0,
             window_size: 50,
             max_val: 100.0,
@@ -41,7 +41,6 @@ impl PID {
     }
 
     pub fn calculate(&mut self, temperature: f32, now: u32) -> f32 {
-        let now = now as f32 / 1000.0;
         let current_error = self.target - temperature;
 
         self.p = self.kp * current_error;
@@ -50,7 +49,9 @@ impl PID {
             self.i += self.ki * current_error / 1000.0; // scale factor of 1000 for convenience
         }
         if now != self.prev_time {
-            self.d = self.kd * (current_error - self.error) / (now - self.prev_time);
+            self.d =
+                self.kd * (current_error - self.error) / ((now - self.prev_time) as f32) * 1000.0;
+            // scale factor
         }
         self.error = current_error;
         self.prev_time = now;
