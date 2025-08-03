@@ -585,7 +585,8 @@ pub fn send_housekeeping_for_pid_tuning(
 ) {
     let hk = arrform!(
         164,
-        "{:?}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}",
+        // "{:?}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}",
+        "{:?}, {:.2}, {:.2}, {:.2}, {:.4}, {:.4}, {:.4}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}",
         state.coffee_state,
         temperatures.p.unwrap_or(0.0),
         temperatures.t2.unwrap_or(0.0),
@@ -596,12 +597,15 @@ pub fn send_housekeeping_for_pid_tuning(
         pid_1.pid_val,
         pid_1.duty_cycle * 100.0,
         temperatures.t3.unwrap_or(0.0),
-        pid_bg.target,
-        pid_bg.p,
-        pid_bg.i,
-        pid_bg.d,
-        pid_bg.pid_val,
-        pid_bg.duty_cycle * 100.0,
+        pid_1.kp,
+        pid_1.kd,
+        pid_1.ki,
+        // pid_bg.target,
+        // pid_bg.p,
+        // pid_bg.i,
+        // pid_bg.d,
+        // pid_bg.pid_val,
+        // pid_bg.duty_cycle * 100.0,
     );
     usb_println(hk.as_str());
 }
