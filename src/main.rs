@@ -44,8 +44,8 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 
 use crate::commands::{
-    extract_command, send_housekeeping, send_housekeeping_for_pid_tuning, ConfigCommand,
-    HeaterCommand, PumpCommand, ValveCommand,
+    extract_command, send_housekeeping_for_pid_tuning, ConfigCommand, HeaterCommand, PumpCommand,
+    ValveCommand,
 };
 use crate::config::ConfigManager;
 use crate::devices::led::LED;
@@ -332,6 +332,7 @@ fn main() -> ! {
 
     let mut pid_data_1 = PidData::default();
     pid_data_1.kp = 0.05;
+    pid_data_1.kd = 10.0;
     let pid_data_1_container =
         Arc::new(Mutex::new(pid_data_1).expect("Failed to create data guard mutex"));
     let _pid_data_1_container_display = pid_data_1_container.clone();
@@ -1322,7 +1323,7 @@ fn main() -> ! {
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            let mut extraction_time = 20;
+            let mut extraction_time = (1.0 / main_task_period as f32 * 30.0) as i32; // 30 seconds
 
             let mut valve_1_override = None;
             let mut valve_2_override = None;
@@ -1510,7 +1511,7 @@ fn main() -> ! {
 
                         led_state = LedState::SlowBlink;
                         // timer of 5s
-                        if timer >= 20 {
+                        if timer >= (1.0 / main_task_period as f32 * 5.0) as i32 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
 
@@ -1538,7 +1539,19 @@ fn main() -> ! {
 
                         led_state = LedState::FastBlink;
 
-                        if timer >= extraction_time || !interface.lever_switch {
+                        if timer >= extraction_time {
+                            if let Ok(mut pid_data_temp) =
+                                pid_1_data_container_main.lock(Duration::ms(5))
+                            {
+                                pid_data_temp.kp = previous_kp;
+                                pid_data_temp.ki = previous_ki;
+                                pid_data_temp.kd = previous_kd;
+                                pid_data_temp.offset = 0.0;
+                                pid_data_temp.reset_i = true;
+                                pid_data_temp.target = previous_target;
+                            }
+                            state.coffee_state = CoffeeState::Timeout;
+                        } else if !interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
@@ -1594,6 +1607,19 @@ fn main() -> ! {
 
                         // TODO: set exit condition here
                         state.coffee_state = CoffeeState::Ready;
+                    }
+                    CoffeeState::Timeout => {
+                        led_state = LedState::SuperFastBlink;
+
+                        if !interface.lever_switch {
+                            if state.heater_1_state == HeaterState::SteadyState
+                                && state.heater_bg_state == HeaterState::SteadyState
+                            {
+                                state.coffee_state = CoffeeState::Ready;
+                            } else {
+                                state.coffee_state = CoffeeState::CoffeeHeating;
+                            }
+                        }
                     }
                 }
 
@@ -1765,6 +1791,13 @@ fn main() -> ! {
                         CurrentTask::delay(Duration::ms(250));
                         led_pwm.set_duty(max_duty);
                         CurrentTask::delay(Duration::ms(240));
+                    }
+                    LedState::SuperFastBlink => {
+                        led_pwm.enable();
+                        led_pwm.set_duty(0);
+                        CurrentTask::delay(Duration::ms(100));
+                        led_pwm.set_duty(max_duty);
+                        CurrentTask::delay(Duration::ms(90));
                     }
                     LedState::SlowBlink => {
                         led_pwm.enable();

@@ -86,6 +86,7 @@ pub enum CoffeeState {
     Extracting,
     SteamHeating,
     Steaming,
+    Timeout,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,7 @@ pub enum LedState {
     SlowSine,
     SlowBlink,
     FastBlink,
+    SuperFastBlink,
 }
 
 #[derive(Clone)]
