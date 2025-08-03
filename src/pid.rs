@@ -49,8 +49,8 @@ impl PID {
             self.i += self.ki * current_error / 1000.0; // scale factor of 1000 for convenience
         }
         if now != self.prev_time {
-            self.d =
-                self.kd * (current_error - self.error) / ((now - self.prev_time) as f32) * 1000.0;
+            self.d = self.kd * (current_error - self.error)
+                / ((now * 1000 - self.prev_time * 1000) as f32);
             // scale factor
         }
         self.error = current_error;
