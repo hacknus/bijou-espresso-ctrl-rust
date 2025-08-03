@@ -48,9 +48,9 @@ impl PID {
         if self.enabled && self.duty_cycle < 1.0 && self.duty_cycle > 0.0 {
             self.i += self.ki * current_error / 1000.0; // scale factor of 1000 for convenience
         }
-        if now != self.prev_time {
+        if now > self.prev_time {
             self.d = self.kd * (current_error - self.error)
-                / ((now * 1000 - self.prev_time * 1000) as f32);
+                / ((now  - self.prev_time ) as f32);
             // scale factor
         }
         self.error = current_error;

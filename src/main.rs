@@ -112,7 +112,7 @@ fn main() -> ! {
 
     // TODO check if TIM4 actually works, before it was TIM5
     let mut tick_timer = dp.TIM4.counter_ms(&clocks);
-    // tick_timer.start(2_678_400_000.millis()).unwrap(); // set the timeout to 31 days
+    tick_timer.start(60000.millis()).unwrap(); // set the timeout to 31 days
 
     stat_led.on();
 
@@ -332,7 +332,8 @@ fn main() -> ! {
 
     let mut pid_data_1 = PidData::default();
     pid_data_1.kp = 0.05;
-    pid_data_1.kd = 10000.0;
+    pid_data_1.ki = 0.005;
+    pid_data_1.kd = 100.0;
     let pid_data_1_container =
         Arc::new(Mutex::new(pid_data_1).expect("Failed to create data guard mutex"));
     let _pid_data_1_container_display = pid_data_1_container.clone();
