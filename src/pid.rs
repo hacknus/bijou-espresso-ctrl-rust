@@ -54,7 +54,7 @@ impl PID {
         }
         self.error = current_error;
         self.prev_time = now;
-        self.val = self.p + self.i + self.d + self.offset;
+        self.val = self.p + self.i - self.d + self.offset;
         self.val
     }
 
