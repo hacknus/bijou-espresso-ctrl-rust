@@ -342,7 +342,8 @@ fn main() -> ! {
     let pid_1_data_container_task = pid_data_1_container.clone();
     let pid_1_data_container_usb = pid_data_1_container;
 
-    let pid_data_2 = PidData::default();
+    let mut pid_data_2 = PidData::default();
+    pid_data_2.kd = 50.0;
     let pid_data_2_container =
         Arc::new(Mutex::new(pid_data_2).expect("Failed to create data guard mutex"));
     let _pid_data_2_container_display = pid_data_2_container.clone();
@@ -1511,8 +1512,8 @@ fn main() -> ! {
                         state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::SlowBlink;
-                        // timer of 5s
-                        if timer >= (1000.0 / main_task_period as f32 * 5.0) as i32 {
+                        // timer of 3s
+                        if timer >= (1000.0 / main_task_period as f32 * 3.0) as i32 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
 
