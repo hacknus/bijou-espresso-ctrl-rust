@@ -1324,7 +1324,7 @@ fn main() -> ! {
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            let mut extraction_time = main_task_period as i32 * 30; // 30 seconds
+            let mut extraction_time = (1.0 / main_task_period as f32 * 30.0) as i32; // 30 seconds
 
             let mut valve_1_override = None;
             let mut valve_2_override = None;
@@ -1512,7 +1512,7 @@ fn main() -> ! {
 
                         led_state = LedState::SlowBlink;
                         // timer of 5s
-                        if timer >= main_task_period as i32 * 5 {
+                        if timer >= (1.0 / main_task_period as f32 * 5.0) as i32 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
 
