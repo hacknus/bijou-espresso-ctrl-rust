@@ -862,6 +862,7 @@ fn main() -> ! {
                     heater_2_pid.kp = pid_temp.kp;
                     heater_2_pid.ki = pid_temp.ki;
                     heater_2_pid.kd = pid_temp.kd;
+                    heater_2_pid.offset = pid_temp.offset;
                     heater_2_pid.window_size = pid_temp.window_size;
                     heater_2_pid.max_val = pid_temp.max_val;
                     heater_2_pid.target = pid_temp.target;
@@ -996,6 +997,7 @@ fn main() -> ! {
                     heater_bg_pid.kp = pid_temp.kp;
                     heater_bg_pid.ki = pid_temp.ki;
                     heater_bg_pid.kd = pid_temp.kd;
+                    heater_bg_pid.offset = pid_temp.offset;
                     heater_bg_pid.window_size = pid_temp.window_size;
                     heater_bg_pid.max_val = pid_temp.max_val;
                     heater_bg_pid.target = pid_temp.target;
@@ -1942,9 +1944,11 @@ fn main() -> ! {
                 // send states
                 if let Ok(mut pid_data_temp) = pid_1_data_container_main.lock(Duration::ms(5)) {
                     pid_data_temp.enable = pid_1_data.enable;
+                    pid_data_temp.target = pid_1_data.target;
                 }
                 if let Ok(mut pid_data_temp) = pid_2_data_container_main.lock(Duration::ms(5)) {
                     pid_data_temp.enable = pid_2_data.enable;
+                    pid_data_temp.target = pid_2_data.target;
                 }
                 if let Ok(mut pid_data_temp) = pid_bg_data_container_main.lock(Duration::ms(5)) {
                     pid_data_temp.enable = pid_bg_data.enable;
