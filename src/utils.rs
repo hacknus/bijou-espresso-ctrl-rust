@@ -26,7 +26,7 @@ impl Default for PumpData {
         PumpData {
             heat_up_power: 15.0,
             pre_infuse_power: 20.0,
-            steam_power: 5.0,
+            steam_power: 0.0,
             extract_power: 42.0,
             extraction_timeout: 20000.0,
             pre_infuse_time: 3000.0,

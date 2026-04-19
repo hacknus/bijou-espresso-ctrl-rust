@@ -1781,7 +1781,8 @@ fn main() -> ! {
                         pid_bg_data.target = interface.brew_head_temperature;
 
                         state.pump_state = PumpState::On(
-                            (max_duty as f32 * (pump.steam_power + encoder_val as f32)) as u16,
+                            (max_duty as f32 * (pump.steam_power + (encoder_val as f32) / 5.0))
+                                as u16,
                         );
 
                         state.valve_1_state = ValveState::Closed;
