@@ -31,19 +31,19 @@ fn EXTI9_5() {
         if button_a.as_ref().unwrap().is_high() && button_b.as_ref().unwrap().is_low() {
             G_ENC_STATE
                 .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() - ENCODER_STEP);
+                .set(G_ENC_STATE.borrow(cs).get() + ENCODER_STEP);
         } else if button_a.as_ref().unwrap().is_low() && button_b.as_ref().unwrap().is_high() {
             G_ENC_STATE
                 .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() - ENCODER_STEP);
+                .set(G_ENC_STATE.borrow(cs).get() + ENCODER_STEP);
         } else if button_a.as_ref().unwrap().is_low() && button_b.as_ref().unwrap().is_low() {
             G_ENC_STATE
                 .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() + ENCODER_STEP);
+                .set(G_ENC_STATE.borrow(cs).get() - ENCODER_STEP);
         } else if button_a.as_ref().unwrap().is_high() && button_b.as_ref().unwrap().is_high() {
             G_ENC_STATE
                 .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() + ENCODER_STEP);
+                .set(G_ENC_STATE.borrow(cs).get() - ENCODER_STEP);
         }
         button_b.as_mut().unwrap().clear_interrupt_pending_bit();
     });

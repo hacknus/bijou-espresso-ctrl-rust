@@ -1380,8 +1380,8 @@ fn main() -> ! {
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            // Long-press threshold: 2 s at 100 ms tick period.
-            const LONG_PRESS_TICKS: i32 = 20;
+            // Long-press threshold: 1.5 s at 100 ms tick period.
+            const LONG_PRESS_TICKS: i32 = 15;
             let mut button_held_ticks: i32 = 0;
             let mut long_press_armed = true;
             // True while the machine is in the steam world (SteamHeating / Ready+steam /
@@ -1510,7 +1510,6 @@ fn main() -> ! {
                 match state.coffee_state {
                     CoffeeState::Idle => {
                         // Always transition straight to CoffeeHeating on startup.
-                        led_state = LedState::Off;
                         state.pump_state = PumpState::Off;
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
@@ -1526,8 +1525,6 @@ fn main() -> ! {
 
                         pid_bg_data.target = interface.brew_head_temperature;
                         pid_1_data.target = interface.coffee_temperature;
-
-                        led_state = LedState::SlowSine;
 
                         if long_press && !water_low {
                             state.coffee_state = CoffeeState::SteamHeating;
@@ -1554,8 +1551,6 @@ fn main() -> ! {
                         }
                     }
                     CoffeeState::Ready => {
-                        led_state = LedState::On;
-
                         // In steam mode keep the steam boiler running while coffee is usable.
                         if steam_mode {
                             pid_2_data.enable = true;
@@ -1623,7 +1618,6 @@ fn main() -> ! {
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
 
-                        led_state = LedState::SlowBlink;
                         if timer >= (pump.pre_infuse_time / main_task_period as f32) as i32 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
@@ -1653,8 +1647,6 @@ fn main() -> ! {
 
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
-
-                        led_state = LedState::FastBlink;
 
                         if timer >= (pump.extraction_timeout / main_task_period as f32) as i32 {
                             if let Ok(mut pid_data_temp) =
@@ -1713,8 +1705,6 @@ fn main() -> ! {
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
 
-                        led_state = LedState::FastSine;
-
                         if long_press {
                             // Long press → back to coffee-only mode.
                             steam_mode = false;
@@ -1764,8 +1754,6 @@ fn main() -> ! {
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
 
-                        led_state = LedState::On;
-
                         if long_press {
                             // Long press → back to coffee-only mode.
                             steam_mode = false;
@@ -1794,8 +1782,6 @@ fn main() -> ! {
                             (max_duty as f32 * (pump.steam_power + encoder_val as f32)) as u16,
                         );
 
-                        led_state = LedState::FastBlink;
-
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Open;
 
@@ -1817,7 +1803,6 @@ fn main() -> ! {
                         }
                     }
                     CoffeeState::Timeout => {
-                        led_state = LedState::SuperFastBlink;
                         if steam_mode {
                             pid_2_data.enable = true;
                             pid_2_data.target = interface.steam_temperature;
@@ -1843,6 +1828,18 @@ fn main() -> ! {
                         }
                     }
                 }
+
+                led_state = match state.coffee_state {
+                    CoffeeState::Idle => LedState::Off,
+                    CoffeeState::CoffeeHeating => LedState::SlowSine,
+                    CoffeeState::Ready => LedState::On,
+                    CoffeeState::PreInfuse => LedState::SlowBlink,
+                    CoffeeState::Extracting => LedState::FastBlink,
+                    CoffeeState::SteamHeating => LedState::FastSine,
+                    CoffeeState::SteamReady => LedState::On,
+                    CoffeeState::Steaming => LedState::FastBlink,
+                    CoffeeState::Timeout => LedState::SuperFastBlink,
+                };
 
                 match state.pump_state {
                     PumpState::Off => match pump_override {
@@ -2003,24 +2000,18 @@ fn main() -> ! {
                     }
                     LedState::FastBlink => {
                         led_pwm.enable();
-                        led_pwm.set_duty(0);
-                        CurrentTask::delay(Duration::ms(250));
-                        led_pwm.set_duty(max_duty);
-                        CurrentTask::delay(Duration::ms(240));
+                        let val = if (count / 50) % 2 == 0 { 0 } else { max_duty };
+                        led_pwm.set_duty(val);
                     }
                     LedState::SuperFastBlink => {
                         led_pwm.enable();
-                        led_pwm.set_duty(0);
-                        CurrentTask::delay(Duration::ms(100));
-                        led_pwm.set_duty(max_duty);
-                        CurrentTask::delay(Duration::ms(90));
+                        let val = if (count / 20) % 2 == 0 { 0 } else { max_duty };
+                        led_pwm.set_duty(val);
                     }
                     LedState::SlowBlink => {
                         led_pwm.enable();
-                        led_pwm.set_duty(0);
-                        CurrentTask::delay(Duration::ms(500));
-                        led_pwm.set_duty(max_duty);
-                        CurrentTask::delay(Duration::ms(490));
+                        let val = if (count / 100) % 2 == 0 { 0 } else { max_duty };
+                        led_pwm.set_duty(val);
                     }
                     LedState::FastSine => {
                         led_pwm.enable();
