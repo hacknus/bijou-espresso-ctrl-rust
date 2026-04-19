@@ -28,23 +28,17 @@ fn EXTI9_5() {
         // Obtain access to Global Encoder Peripheral and Clear Interrupt Pending Flag
         let button_a = G_ENC_PIN_A.borrow(cs).borrow_mut();
         let mut button_b = G_ENC_PIN_B.borrow(cs).borrow_mut();
+        let mut next = G_ENC_STATE.borrow(cs).get();
         if button_a.as_ref().unwrap().is_high() && button_b.as_ref().unwrap().is_low() {
-            G_ENC_STATE
-                .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() + ENCODER_STEP);
+            next += ENCODER_STEP;
         } else if button_a.as_ref().unwrap().is_low() && button_b.as_ref().unwrap().is_high() {
-            G_ENC_STATE
-                .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() + ENCODER_STEP);
+            next += ENCODER_STEP;
         } else if button_a.as_ref().unwrap().is_low() && button_b.as_ref().unwrap().is_low() {
-            G_ENC_STATE
-                .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() - ENCODER_STEP);
+            next -= ENCODER_STEP;
         } else if button_a.as_ref().unwrap().is_high() && button_b.as_ref().unwrap().is_high() {
-            G_ENC_STATE
-                .borrow(cs)
-                .set(G_ENC_STATE.borrow(cs).get() - ENCODER_STEP);
+            next -= ENCODER_STEP;
         }
+        G_ENC_STATE.borrow(cs).set(next.max(0));
         button_b.as_mut().unwrap().clear_interrupt_pending_bit();
     });
 }

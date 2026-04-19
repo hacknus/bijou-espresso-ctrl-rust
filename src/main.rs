@@ -1494,6 +1494,12 @@ fn main() -> ! {
                 cortex_m::interrupt::free(|cs| {
                     encoder_val = G_ENC_STATE.borrow(cs).get();
                 });
+                if encoder_val < 0 {
+                    encoder_val = 0;
+                    cortex_m::interrupt::free(|cs| {
+                        G_ENC_STATE.borrow(cs).set(0);
+                    });
+                }
 
                 // Long-press detection: emit a one-shot event, then require release to re-arm.
                 if interface.button {
@@ -1532,18 +1538,18 @@ fn main() -> ! {
                             state.coffee_state = CoffeeState::SteamHeating;
                             state.heater_2_state = HeaterState::HeatUp;
                         } else if interface.lever_switch && !water_low {
-                            if let Ok(pid_data_temp) =
+                            if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
                                 previous_kp = pid_data_temp.kp;
                                 previous_ki = pid_data_temp.ki;
                                 previous_kd = pid_data_temp.kd;
                                 previous_target = pid_data_temp.target;
-
-                                state.pump_state = PumpState::On(
-                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
-                                );
+                                pid_data_temp.offset = 1.0;
+                                pid_data_temp.target += 2.0;
                             }
+                            state.coffee_state = CoffeeState::PreInfuse;
+                            timer = 0;
                         } else if state.heater_1_state == HeaterState::SteadyState
                             && state.heater_bg_state == HeaterState::SteadyState
                         {
@@ -1713,19 +1719,22 @@ fn main() -> ! {
                             pid_2_data.enable = false;
                             state.heater_2_state = HeaterState::Off;
                             state.coffee_state = CoffeeState::CoffeeHeating;
+                        } else if encoder_val > 0 {
+                            state.coffee_state = CoffeeState::Steaming;
                         } else if interface.lever_switch && !water_low {
                             // Allow extraction even while steam is still heating up.
-                            if let Ok(pid_data_temp) =
+                            if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
                                 previous_kp = pid_data_temp.kp;
                                 previous_ki = pid_data_temp.ki;
                                 previous_kd = pid_data_temp.kd;
                                 previous_target = pid_data_temp.target;
-                                state.pump_state = PumpState::On(
-                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
-                                );
+                                pid_data_temp.offset = 1.0;
+                                pid_data_temp.target += 2.0;
                             }
+                            state.coffee_state = CoffeeState::PreInfuse;
+                            timer = 0;
                         } else if state.heater_1_state == HeaterState::SteadyState
                             && state.heater_bg_state == HeaterState::SteadyState
                             && state.heater_2_state == HeaterState::SteadyState
@@ -1781,8 +1790,8 @@ fn main() -> ! {
                         pid_bg_data.target = interface.brew_head_temperature;
 
                         state.pump_state = PumpState::On(
-                            (max_duty as f32 * (pump.steam_power + (encoder_val as f32)) / 100.0)
-                                as u16,
+                            (max_duty as f32 * (pump.steam_power + (encoder_val as f32) / 5.0)
+                                / 100.0) as u16,
                         );
 
                         state.valve_1_state = ValveState::Closed;
