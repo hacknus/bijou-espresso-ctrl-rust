@@ -5,16 +5,19 @@ pub struct MeasuredData {
     pub t3: Option<f32>,
     pub t4: Option<f32>,
     pub t5: Option<f32>,
-    pub p: Option<f32>,
+    pub p: Option<f32>, // pressure in bar
+    pub i: Option<f32>, // current in A
 }
 
+#[repr(C)]
 #[derive(Clone)]
 pub struct PumpData {
     pub heat_up_power: f32,
     pub pre_infuse_power: f32,
     pub steam_power: f32,
     pub extract_power: f32,
-    pub extraction_timeout: f32,
+    pub extraction_timeout: f32, // ms – total extraction window
+    pub pre_infuse_time: f32,    // ms – pre-infuse phase duration
     pub enable: bool,
 }
 
@@ -23,9 +26,10 @@ impl Default for PumpData {
         PumpData {
             heat_up_power: 15.0,
             pre_infuse_power: 20.0,
-            steam_power: 10.0,
+            steam_power: 5.0,
             extract_power: 42.0,
             extraction_timeout: 20000.0,
+            pre_infuse_time: 3000.0,
             enable: false,
         }
     }
@@ -50,6 +54,10 @@ pub struct PidData {
     pub reset_i: bool,
     pub pid_val: f32,
     pub duty_cycle: f32,
+    /// Manual duty-cycle override (0.0 – 1.0).  `Some(v)` bypasses the PID
+    /// output; `None` resumes normal PID control.  The `enable` flag is still
+    /// respected — the heater stays off when disabled regardless of this value.
+    pub override_duty: Option<f32>,
 }
 
 impl Default for PidData {
@@ -72,6 +80,7 @@ impl Default for PidData {
             reset_i: false,
             pid_val: 0.0,
             duty_cycle: 0.0,
+            override_duty: None,
         }
     }
 }
@@ -85,6 +94,7 @@ pub enum CoffeeState {
     PreInfuse,
     Extracting,
     SteamHeating,
+    SteamReady,
     Steaming,
     Timeout,
 }
@@ -94,6 +104,7 @@ pub enum LedState {
     Off,
     On,
     SlowSine,
+    FastSine,
     SlowBlink,
     FastBlink,
     SuperFastBlink,

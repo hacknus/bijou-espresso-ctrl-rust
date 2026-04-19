@@ -44,14 +44,14 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 
 use crate::commands::{
-    extract_command, send_housekeeping_for_pid_tuning, ConfigCommand, HeaterCommand, PumpCommand,
+    extract_command, send_housekeeping, CmdContext, ConfigCommand, HeaterCommand, PumpCommand,
     ValveCommand,
 };
 use crate::config::ConfigManager;
+use crate::devices::adc_sense::{read_current, read_pressure, ADC_MEMORY, G_XFR};
 use crate::devices::led::LED;
 use crate::devices::max31865::Wires;
 use crate::devices::max31865::MAX31865;
-use crate::devices::pressure_sense::{read_pressure, ADC_MEMORY, G_XFR};
 use crate::devices::w25q32::FLASH_SPI_MODE;
 use crate::intrpt::{G_ENC_PIN_A, G_ENC_PIN_B, G_ENC_STATE};
 use crate::mav::Mav;
@@ -324,7 +324,6 @@ fn main() -> ! {
         Arc::new(Mutex::new(measured_data).expect("Failed to create data guard mutex"));
     let measured_data_container_display = measured_data_container.clone();
     let measured_data_container_adc = measured_data_container.clone();
-    let measured_data_container_main = measured_data_container.clone();
     let measured_data_container_pid_1 = measured_data_container.clone();
     let measured_data_container_pid_2 = measured_data_container.clone();
     let measured_data_container_pid_bg = measured_data_container.clone();
@@ -430,6 +429,7 @@ fn main() -> ! {
                 }
 
                 let pressure = read_pressure();
+                let current = read_current();
 
                 let t1 = if max31865_1_state.is_ok() {
                     max31865_1.get_temperature()
@@ -464,6 +464,7 @@ fn main() -> ! {
                     measured_data.t4 = t4;
                     measured_data.t5 = t5;
                     measured_data.p = pressure;
+                    measured_data.i = current;
                 }
                 CurrentTask::delay(Duration::ms(100));
             }
@@ -538,7 +539,9 @@ fn main() -> ! {
                                     &mut pid_bg,
                                 ) {
                                     Ok(_) => usb_println("PID configuration loaded"),
-                                    Err(e) => usb_println("Failed to load PID configuration"),
+                                    Err(e) => usb_println(
+                                        arrform!(64, "[ERR] load PID: {:?}", e).as_str(),
+                                    ),
                                 };
                             } else {
                                 usb_println("Failed to lock PID data containers");
@@ -552,7 +555,9 @@ fn main() -> ! {
                             ) {
                                 match config_manager.update_from_pid_data(&pid_1, &pid_2, &pid_bg) {
                                     Ok(_) => usb_println("PID configuration saved"),
-                                    Err(e) => usb_println("Failed to save PID configuration"),
+                                    Err(e) => usb_println(
+                                        arrform!(64, "[ERR] save PID: {:?}", e).as_str(),
+                                    ),
                                 };
                             } else {
                                 usb_println("Failed to lock PID data containers");
@@ -562,7 +567,9 @@ fn main() -> ! {
                             if let Ok(mut pump) = pump_data_container_task.lock(Duration::ms(5)) {
                                 match config_manager.apply_to_pump_data(&mut pump) {
                                     Ok(_) => usb_println("Pump configuration loaded"),
-                                    Err(e) => usb_println("Failed to load pump configuration"),
+                                    Err(e) => usb_println(
+                                        arrform!(64, "[ERR] load pump: {:?}", e).as_str(),
+                                    ),
                                 };
                             } else {
                                 usb_println("Failed to lock pump data container");
@@ -572,7 +579,9 @@ fn main() -> ! {
                             if let Ok(pump) = pump_data_container_task.lock(Duration::ms(5)) {
                                 match config_manager.update_from_pump_data(&pump) {
                                     Ok(_) => usb_println("Pump configuration saved"),
-                                    Err(e) => usb_println("Failed to save pump configuration"),
+                                    Err(e) => usb_println(
+                                        arrform!(64, "[ERR] save pump: {:?}", e).as_str(),
+                                    ),
                                 };
                             } else {
                                 usb_println("Failed to lock pump data container");
@@ -584,7 +593,9 @@ fn main() -> ! {
                             {
                                 match config_manager.apply_to_interface(&mut interface) {
                                     Ok(_) => usb_println("Interface configuration loaded"),
-                                    Err(e) => usb_println("Failed to load interface configuration"),
+                                    Err(e) => usb_println(
+                                        arrform!(64, "[ERR] load interface: {:?}", e).as_str(),
+                                    ),
                                 };
                             } else {
                                 usb_println("Failed to lock interface data container");
@@ -596,10 +607,44 @@ fn main() -> ! {
                             {
                                 match config_manager.update_from_interface(&interface) {
                                     Ok(_) => usb_println("Interface configuration saved"),
-                                    Err(e) => usb_println("Failed to save interface configuration"),
+                                    Err(e) => usb_println(
+                                        arrform!(64, "[ERR] save interface: {:?}", e).as_str(),
+                                    ),
                                 };
                             } else {
                                 usb_println("Failed to lock interface data container");
+                            }
+                        }
+                        ConfigCommand::ResetAll => {
+                            // Reset all containers to firmware defaults then persist.
+                            if let (
+                                Ok(mut pid_1),
+                                Ok(mut pid_2),
+                                Ok(mut pid_bg),
+                                Ok(mut pump),
+                                Ok(mut interface),
+                            ) = (
+                                pid_1_data_container_task.lock(Duration::ms(5)),
+                                pid_2_data_container_task.lock(Duration::ms(5)),
+                                pid_bg_data_container_task.lock(Duration::ms(5)),
+                                pump_data_container_task.lock(Duration::ms(5)),
+                                interface_data_container_task.lock(Duration::ms(5)),
+                            ) {
+                                *pid_1 = PidData::default();
+                                *pid_2 = PidData::default();
+                                *pid_bg = PidData::default();
+                                *pump = PumpData::default();
+                                interface.coffee_temperature =
+                                    Interface::default().coffee_temperature;
+                                interface.brew_head_temperature =
+                                    Interface::default().brew_head_temperature;
+                                interface.steam_temperature =
+                                    Interface::default().steam_temperature;
+                                let _ = config_manager
+                                    .save_all_data(&pid_1, &pid_2, &pid_bg, &pump, &interface);
+                                usb_println("[CFG] all config reset to defaults");
+                            } else {
+                                usb_println("[CFG] failed to lock containers for reset");
                             }
                         }
                     }
@@ -615,13 +660,13 @@ fn main() -> ! {
         .start(move || {
             let mut heater_1_pid = PID::new();
             let mut heater_1_current_temperature = None;
-            let mut heater_1_boiler_override = None;
+            let mut heater_1_override_duty: Option<f32> = None;
             let mut heater_2_pid = PID::new();
             let mut heater_2_current_temperature = None;
-            let mut heater_2_boiler_override = None;
+            let mut heater_2_override_duty: Option<f32> = None;
             let mut heater_bg_pid = PID::new();
             let mut heater_bg_current_temperature = None;
-            let mut heater_bg_boiler_override = None;
+            let mut heater_bg_override_duty: Option<f32> = None;
 
             let mut state = State::default();
 
@@ -671,7 +716,8 @@ fn main() -> ! {
                             HeaterCommand::PidI(ki) => pid_temp.ki = ki,
                             HeaterCommand::PidD(kd) => pid_temp.kd = kd,
                             HeaterCommand::PidMaxVal(max_val) => pid_temp.max_val = max_val,
-                            HeaterCommand::Boiler1(boiler_1) => heater_1_boiler_override = boiler_1,
+                            HeaterCommand::Osr(osr) => pid_temp.osr = osr,
+                            HeaterCommand::OverrideDuty(v) => pid_temp.override_duty = v,
                         }
                     }
                 }
@@ -702,6 +748,7 @@ fn main() -> ! {
                     pid_temp.d = heater_1_pid.d;
                     pid_temp.pid_val = heater_1_pid.val;
                     pid_temp.duty_cycle = heater_1_pid.duty_cycle;
+                    heater_1_override_duty = pid_temp.override_duty;
 
                     // state-machine
                     match state.heater_1_state {
@@ -774,7 +821,10 @@ fn main() -> ! {
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
                         // since the heating process is slow, it is okay to have a larger window size
-                        let duty_cycle = heater_1_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let duty_cycle = match heater_1_override_duty {
+                            Some(v) => v,
+                            None => heater_1_pid.get_heat_value(t, tick_timer.now().ticks()),
+                        };
                         let max_duty = heater_1_pwm.get_max_duty();
                         if heater_1_pid.enabled {
                             heater_1_pwm.enable();
@@ -800,7 +850,8 @@ fn main() -> ! {
                             HeaterCommand::PidI(ki) => pid_temp.ki = ki,
                             HeaterCommand::PidD(kd) => pid_temp.kd = kd,
                             HeaterCommand::PidMaxVal(max_val) => pid_temp.max_val = max_val,
-                            HeaterCommand::Boiler1(boiler_1) => heater_2_boiler_override = boiler_1,
+                            HeaterCommand::Osr(osr) => pid_temp.osr = osr,
+                            HeaterCommand::OverrideDuty(v) => pid_temp.override_duty = v,
                         }
                     }
                 }
@@ -831,6 +882,7 @@ fn main() -> ! {
                     pid_temp.d = heater_2_pid.d;
                     pid_temp.pid_val = heater_2_pid.val;
                     pid_temp.duty_cycle = heater_2_pid.duty_cycle;
+                    heater_2_override_duty = pid_temp.override_duty;
 
                     // state-machine
                     match state.heater_2_state {
@@ -903,7 +955,10 @@ fn main() -> ! {
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
                         // since the heating process is slow, it is okay to have a larger window size
-                        let duty_cycle = heater_2_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let duty_cycle = match heater_2_override_duty {
+                            Some(v) => v,
+                            None => heater_2_pid.get_heat_value(t, tick_timer.now().ticks()),
+                        };
                         let max_duty = heater_2_pwm.get_max_duty();
                         if heater_2_pid.enabled {
                             heater_2_pwm.enable();
@@ -929,9 +984,8 @@ fn main() -> ! {
                             HeaterCommand::PidI(ki) => pid_temp.ki = ki,
                             HeaterCommand::PidD(kd) => pid_temp.kd = kd,
                             HeaterCommand::PidMaxVal(max_val) => pid_temp.max_val = max_val,
-                            HeaterCommand::Boiler1(boiler_1) => {
-                                heater_bg_boiler_override = boiler_1
-                            }
+                            HeaterCommand::Osr(osr) => pid_temp.osr = osr,
+                            HeaterCommand::OverrideDuty(v) => pid_temp.override_duty = v,
                         }
                     }
                 }
@@ -961,6 +1015,7 @@ fn main() -> ! {
                     pid_temp.d = heater_bg_pid.d;
                     pid_temp.pid_val = heater_bg_pid.val;
                     pid_temp.duty_cycle = heater_bg_pid.duty_cycle;
+                    heater_bg_override_duty = pid_temp.override_duty;
 
                     // state-machine
                     match state.heater_bg_state {
@@ -1035,7 +1090,10 @@ fn main() -> ! {
                         // this is not really PWM, since the solid state relay only switches at zero-crossing
                         // so we cannot use high frequency pwm
                         // since the heating process is slow, it is okay to have a larger window size
-                        let duty_cycle = heater_bg_pid.get_heat_value(t, tick_timer.now().ticks());
+                        let duty_cycle = match heater_bg_override_duty {
+                            Some(v) => v,
+                            None => heater_bg_pid.get_heat_value(t, tick_timer.now().ticks()),
+                        };
                         let max_duty = heater_bg_pwm.get_max_duty();
                         if heater_bg_pid.enabled {
                             heater_bg_pwm.enable(Channel::C3);
@@ -1265,39 +1323,36 @@ fn main() -> ! {
                     state = state_temp.clone();
                 }
 
-                // send_housekeeping(
-                //     &state,
-                //     &temperature_data,
-                //     &interface,
-                //     &pid_1_data,
-                //     &pump,
-                //     "",
-                // );
-
-                send_housekeeping_for_pid_tuning(
-                    &state,
-                    &temperature_data,
-                    &interface,
-                    &pid_1_data,
-                    &pid_bg_data,
-                    &pump,
-                    "",
-                );
+                if hk {
+                    send_housekeeping(&state, &temperature_data, &pid_1_data, &pid_bg_data);
+                }
 
                 let mut message_bytes = [0; 1024];
                 usb_read(&mut message_bytes);
                 if let Ok(cmd) = core::str::from_utf8(&message_bytes) {
-                    extract_command(
-                        cmd,
-                        &heater_1_command_queue_usb,
-                        &heater_2_command_queue_usb,
-                        &heater_bg_command_queue_usb,
-                        &pump_command_queue_usb,
-                        &valve_command_queue_usb,
-                        &config_command_queue_usb,
-                        &mut hk,
-                        &mut hk_rate,
-                    );
+                    if cmd.contains("[CMD]") {
+                        let mut ctx = CmdContext {
+                            heater_1_queue: heater_1_command_queue_usb.clone(),
+                            heater_2_queue: heater_2_command_queue_usb.clone(),
+                            heater_bg_queue: heater_bg_command_queue_usb.clone(),
+                            pump_queue: pump_command_queue_usb.clone(),
+                            valve_queue: valve_command_queue_usb.clone(),
+                            config_queue: config_command_queue_usb.clone(),
+                            interface_container: interface_data_container_usb.clone(),
+                            pid_1: pid_1_data.clone(),
+                            pid_2: pid_2_data.clone(),
+                            pid_bg: pid_bg_data.clone(),
+                            pump: pump.clone(),
+                            interface: interface.clone(),
+                            state: state.clone(),
+                            temperatures: temperature_data.clone(),
+                            hk,
+                            hk_rate,
+                        };
+                        extract_command(cmd, &mut ctx);
+                        hk = ctx.hk;
+                        hk_rate = ctx.hk_rate;
+                    }
                 }
 
                 // sample frequency
@@ -1314,18 +1369,23 @@ fn main() -> ! {
         .stack_size(512)
         .priority(TaskPriority(2))
         .start(move || {
-            let mut temperature_data = MeasuredData::default();
             let mut pid_1_data = PidData::default();
             let mut pid_2_data = PidData::default();
             let mut pid_bg_data = PidData::default();
             let mut pump = PumpData::default();
+            let mut encoder_val = 0;
             let mut interface = Interface::default();
             let mut led_state;
             let mut state = State::default();
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            let mut extraction_time = (1000.0 / main_task_period as f32 * 30.0) as i32; // 30 seconds
+            // Long-press threshold: 2 s at 100 ms tick period.
+            const LONG_PRESS_TICKS: i32 = 20;
+            let mut button_held_ticks: i32 = 0;
+            // True while the machine is in the steam world (SteamHeating / Ready+steam /
+            // SteamReady / Steaming / extraction during steam heat-up).
+            let mut steam_mode = false;
 
             let mut valve_1_override = None;
             let mut valve_2_override = None;
@@ -1343,11 +1403,6 @@ fn main() -> ! {
                 }
 
                 // gather all containers
-                if let Ok(temperature_data_temp) =
-                    measured_data_container_main.lock(Duration::ms(5))
-                {
-                    temperature_data = temperature_data_temp.clone();
-                }
                 if let Ok(pid_data_temp) = pid_1_data_container_main.lock(Duration::ms(5)) {
                     pid_1_data = pid_data_temp.clone();
                 }
@@ -1383,13 +1438,6 @@ fn main() -> ! {
                         PumpCommand::PumpOverride(state) => {
                             pump_override = state;
                         }
-                        PumpCommand::PumpPower(pwr) => {
-                            if let Ok(mut pump_temp) =
-                                pump_data_container_main.lock(Duration::ms(5))
-                            {
-                                pump_temp.extract_power = pwr as f32;
-                            }
-                        }
                         PumpCommand::PumpHeatUpPower(pwr) => {
                             if let Ok(mut pump_temp) =
                                 pump_data_container_main.lock(Duration::ms(5))
@@ -1418,6 +1466,20 @@ fn main() -> ! {
                                 pump_temp.steam_power = pwr as f32;
                             }
                         }
+                        PumpCommand::PumpExtractionTimeout(timeout) => {
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(5))
+                            {
+                                pump_temp.extraction_timeout = timeout;
+                            }
+                        }
+                        PumpCommand::PumpPreInfuseTime(t) => {
+                            if let Ok(mut pump_temp) =
+                                pump_data_container_main.lock(Duration::ms(5))
+                            {
+                                pump_temp.pre_infuse_time = t;
+                            }
+                        }
                     }
                 }
 
@@ -1426,23 +1488,30 @@ fn main() -> ! {
                 interface.button = button.is_low();
                 interface.lever_switch = lever.is_low();
 
+                cortex_m::interrupt::free(|cs| {
+                    encoder_val = G_ENC_STATE.borrow(cs).get();
+                });
+
+                // Long-press detection: fires exactly once when threshold is reached.
+                if interface.button {
+                    button_held_ticks = (button_held_ticks + 1).min(LONG_PRESS_TICKS + 1);
+                } else {
+                    button_held_ticks = 0;
+                }
+                let long_press = button_held_ticks >= LONG_PRESS_TICKS;
+
                 match state.coffee_state {
                     CoffeeState::Idle => {
+                        // Always transition straight to CoffeeHeating on startup.
+                        led_state = LedState::Off;
                         state.pump_state = PumpState::Off;
-
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
-
-                        led_state = LedState::Off;
                         pid_1_data.enable = false;
                         pid_2_data.enable = false;
-                        pid_bg_data.enable = true;
-                        pid_bg_data.target = 60.0;
-                        if (interface.button || pid_1_data.enable) && !water_low {
-                            state.coffee_state = CoffeeState::CoffeeHeating;
-                            state.heater_1_state = HeaterState::HeatUp;
-                            state.heater_bg_state = HeaterState::HeatUp;
-                        }
+                        state.coffee_state = CoffeeState::CoffeeHeating;
+                        state.heater_1_state = HeaterState::HeatUp;
+                        state.heater_bg_state = HeaterState::HeatUp;
                     }
                     CoffeeState::CoffeeHeating => {
                         pid_1_data.enable = true;
@@ -1453,8 +1522,11 @@ fn main() -> ! {
 
                         led_state = LedState::SlowSine;
 
-                        if interface.lever_switch && !water_low {
-                            if let Ok(mut pid_data_temp) =
+                        if long_press && !water_low {
+                            state.coffee_state = CoffeeState::SteamHeating;
+                            state.heater_2_state = HeaterState::HeatUp;
+                        } else if interface.lever_switch && !water_low {
+                            if let Ok(pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
                                 previous_kp = pid_data_temp.kp;
@@ -1476,7 +1548,27 @@ fn main() -> ! {
                     }
                     CoffeeState::Ready => {
                         led_state = LedState::On;
-                        if interface.lever_switch {
+
+                        // In steam mode keep the steam boiler running while coffee is usable.
+                        if steam_mode {
+                            pid_2_data.enable = true;
+                            pid_2_data.target = interface.steam_temperature;
+                        }
+
+                        if long_press {
+                            if steam_mode {
+                                // Long press in steam mode → back to coffee only.
+                                steam_mode = false;
+                                pid_2_data.enable = false;
+                                state.heater_2_state = HeaterState::Off;
+                                state.coffee_state = CoffeeState::CoffeeHeating;
+                            } else if !water_low {
+                                // Long press in coffee mode → start steam heating.
+                                steam_mode = true;
+                                state.heater_2_state = HeaterState::HeatUp;
+                                state.coffee_state = CoffeeState::SteamHeating;
+                            }
+                        } else if interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
@@ -1491,8 +1583,17 @@ fn main() -> ! {
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
-                        } else if state.heater_1_state != HeaterState::SteadyState
-                            || state.heater_bg_state != HeaterState::SteadyState
+                        } else if steam_mode && state.heater_2_state == HeaterState::SteadyState {
+                            // Steam boiler caught up while we were in Ready → promote to SteamReady.
+                            state.coffee_state = CoffeeState::SteamReady;
+                        } else if steam_mode
+                            && (state.heater_1_state != HeaterState::SteadyState
+                                || state.heater_bg_state != HeaterState::SteadyState)
+                        {
+                            state.coffee_state = CoffeeState::SteamHeating;
+                        } else if !steam_mode
+                            && (state.heater_1_state != HeaterState::SteadyState
+                                || state.heater_bg_state != HeaterState::SteadyState)
                         {
                             state.coffee_state = CoffeeState::CoffeeHeating;
                         }
@@ -1500,6 +1601,10 @@ fn main() -> ! {
                     CoffeeState::PreInfuse => {
                         pid_1_data.enable = true;
                         pid_bg_data.enable = true;
+                        if steam_mode {
+                            pid_2_data.enable = true;
+                            pid_2_data.target = interface.steam_temperature;
+                        }
 
                         pid_bg_data.target = interface.brew_head_temperature;
                         pid_1_data.target = interface.coffee_temperature;
@@ -1512,8 +1617,7 @@ fn main() -> ! {
                         state.valve_2_state = ValveState::Closed;
 
                         led_state = LedState::SlowBlink;
-                        // timer of 3s
-                        if timer >= (1000.0 / main_task_period as f32 * 3.0) as i32 {
+                        if timer >= (pump.pre_infuse_time / main_task_period as f32) as i32 {
                             state.coffee_state = CoffeeState::Extracting;
                             timer = 0;
 
@@ -1529,6 +1633,10 @@ fn main() -> ! {
                     CoffeeState::Extracting => {
                         pid_1_data.enable = true;
                         pid_bg_data.enable = true;
+                        if steam_mode {
+                            pid_2_data.enable = true;
+                            pid_2_data.target = interface.steam_temperature;
+                        }
 
                         pid_bg_data.target = interface.brew_head_temperature;
                         pid_1_data.target = interface.coffee_temperature;
@@ -1541,7 +1649,7 @@ fn main() -> ! {
 
                         led_state = LedState::FastBlink;
 
-                        if timer >= extraction_time {
+                        if timer >= (pump.extraction_timeout / main_task_period as f32) as i32 {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
                             {
@@ -1564,7 +1672,17 @@ fn main() -> ! {
                                 pid_data_temp.reset_i = true;
                                 pid_data_temp.target = previous_target;
                             }
-                            if state.heater_1_state == HeaterState::SteadyState
+                            // Route back into the appropriate world after shot.
+                            if steam_mode {
+                                if state.heater_1_state == HeaterState::SteadyState
+                                    && state.heater_bg_state == HeaterState::SteadyState
+                                    && state.heater_2_state == HeaterState::SteadyState
+                                {
+                                    state.coffee_state = CoffeeState::SteamReady;
+                                } else {
+                                    state.coffee_state = CoffeeState::SteamHeating;
+                                }
+                            } else if state.heater_1_state == HeaterState::SteadyState
                                 && state.heater_bg_state == HeaterState::SteadyState
                             {
                                 state.coffee_state = CoffeeState::Ready;
@@ -1574,47 +1692,141 @@ fn main() -> ! {
                         }
                     }
                     CoffeeState::SteamHeating => {
+                        // Steam mode: all three boilers heat in parallel.
+                        // Coffee extraction is available as soon as coffee/bg reach steady state.
+                        steam_mode = true;
                         pid_1_data.enable = true;
                         pid_2_data.enable = true;
+                        pid_bg_data.enable = true;
 
                         pid_1_data.target = interface.coffee_temperature;
                         pid_2_data.target = interface.steam_temperature;
-
-                        state.pump_state = PumpState::Off;
+                        pid_bg_data.target = interface.brew_head_temperature;
 
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Closed;
 
-                        led_state = LedState::SlowSine;
-                        if state.heater_1_state == HeaterState::SteadyState
+                        led_state = LedState::FastSine;
+
+                        if long_press {
+                            // Long press → back to coffee-only mode.
+                            steam_mode = false;
+                            pid_2_data.enable = false;
+                            state.heater_2_state = HeaterState::Off;
+                            state.coffee_state = CoffeeState::CoffeeHeating;
+                        } else if interface.lever_switch && !water_low {
+                            // Allow extraction even while steam is still heating up.
+                            if let Ok(pid_data_temp) =
+                                pid_1_data_container_main.lock(Duration::ms(5))
+                            {
+                                previous_kp = pid_data_temp.kp;
+                                previous_ki = pid_data_temp.ki;
+                                previous_kd = pid_data_temp.kd;
+                                previous_target = pid_data_temp.target;
+                                state.pump_state = PumpState::On(
+                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
+                                );
+                            }
+                        } else if state.heater_1_state == HeaterState::SteadyState
+                            && state.heater_bg_state == HeaterState::SteadyState
                             && state.heater_2_state == HeaterState::SteadyState
                         {
+                            // All boilers ready.
+                            state.coffee_state = CoffeeState::SteamReady;
+                        } else if state.heater_1_state == HeaterState::SteadyState
+                            && state.heater_bg_state == HeaterState::SteadyState
+                        {
+                            // Coffee ready; steam still coming up – go to Ready.
+                            // steam_mode stays true so Ready keeps pid_2 running.
                             state.coffee_state = CoffeeState::Ready;
+                        } else {
+                            state.pump_state = PumpState::Off;
                         }
                     }
-                    CoffeeState::Steaming => {
+                    CoffeeState::SteamReady => {
+                        steam_mode = true;
                         pid_1_data.enable = true;
                         pid_2_data.enable = true;
+                        pid_bg_data.enable = true;
 
                         pid_1_data.target = interface.coffee_temperature;
                         pid_2_data.target = interface.steam_temperature;
+                        pid_bg_data.target = interface.brew_head_temperature;
 
-                        state.pump_state =
-                            PumpState::On((max_duty as f32 * (pump.steam_power / 100.0)) as u16);
+                        state.pump_state = PumpState::Off;
+                        state.valve_1_state = ValveState::Closed;
+                        state.valve_2_state = ValveState::Closed;
+
+                        led_state = LedState::On;
+
+                        if long_press {
+                            // Long press → back to coffee-only mode.
+                            steam_mode = false;
+                            pid_2_data.enable = false;
+                            state.heater_2_state = HeaterState::Off;
+                            state.coffee_state = CoffeeState::CoffeeHeating;
+                        } else if encoder_val > 0 {
+                            state.coffee_state = CoffeeState::Steaming;
+                        } else if state.heater_1_state != HeaterState::SteadyState
+                            || state.heater_2_state != HeaterState::SteadyState
+                        {
+                            state.coffee_state = CoffeeState::SteamHeating;
+                        }
+                    }
+                    CoffeeState::Steaming => {
+                        steam_mode = true;
+                        pid_1_data.enable = true;
+                        pid_2_data.enable = true;
+                        pid_bg_data.enable = true;
+
+                        pid_1_data.target = interface.coffee_temperature;
+                        pid_2_data.target = interface.steam_temperature;
+                        pid_bg_data.target = interface.brew_head_temperature;
+
+                        state.pump_state = PumpState::On(
+                            (max_duty as f32 * (pump.steam_power + encoder_val as f32)) as u16,
+                        );
 
                         led_state = LedState::FastBlink;
 
                         state.valve_1_state = ValveState::Closed;
                         state.valve_2_state = ValveState::Open;
 
-                        // TODO: set exit condition here
-                        state.coffee_state = CoffeeState::Ready;
+                        if long_press {
+                            // Long press → back to coffee-only mode.
+                            steam_mode = false;
+                            state.valve_1_state = ValveState::Closed;
+                            state.valve_2_state = ValveState::Closed;
+                            state.pump_state = PumpState::Off;
+                            pid_2_data.enable = false;
+                            state.heater_2_state = HeaterState::Off;
+                            state.coffee_state = CoffeeState::CoffeeHeating;
+                        } else if encoder_val <= 0 {
+                            // Valve closed → steaming done, return to SteamReady.
+                            state.valve_1_state = ValveState::Closed;
+                            state.valve_2_state = ValveState::Closed;
+                            state.pump_state = PumpState::Off;
+                            state.coffee_state = CoffeeState::SteamReady;
+                        }
                     }
                     CoffeeState::Timeout => {
                         led_state = LedState::SuperFastBlink;
+                        if steam_mode {
+                            pid_2_data.enable = true;
+                            pid_2_data.target = interface.steam_temperature;
+                        }
 
                         if !interface.lever_switch {
-                            if state.heater_1_state == HeaterState::SteadyState
+                            if steam_mode {
+                                if state.heater_1_state == HeaterState::SteadyState
+                                    && state.heater_bg_state == HeaterState::SteadyState
+                                    && state.heater_2_state == HeaterState::SteadyState
+                                {
+                                    state.coffee_state = CoffeeState::SteamReady;
+                                } else {
+                                    state.coffee_state = CoffeeState::SteamHeating;
+                                }
+                            } else if state.heater_1_state == HeaterState::SteadyState
                                 && state.heater_bg_state == HeaterState::SteadyState
                             {
                                 state.coffee_state = CoffeeState::Ready;
@@ -1647,23 +1859,18 @@ fn main() -> ! {
                         }
                     },
                     PumpState::On(pwr) => match pump_override {
-                        None => {
+                        // No override, or override=true: state machine already wants the pump on,
+                        // so honour its computed power level.
+                        None | Some(true) => {
                             bldc_pwm.set_duty(pwr);
                             bldc_en.set_low();
                             bldc_pwm.enable();
                         }
-                        Some(state) => {
-                            if state {
-                                bldc_pwm.set_duty(
-                                    (max_duty as f32 * (pump.extract_power / 100.0)) as u16,
-                                );
-                                bldc_en.set_low();
-                                bldc_pwm.enable();
-                            } else {
-                                bldc_pwm.set_duty(0);
-                                bldc_en.set_high();
-                                bldc_pwm.disable();
-                            }
+                        // override=false: force off (e-stop / manual stop).
+                        Some(false) => {
+                            bldc_pwm.set_duty(0);
+                            bldc_en.set_high();
+                            bldc_pwm.disable();
                         }
                     },
                 }
@@ -1807,6 +2014,12 @@ fn main() -> ! {
                         CurrentTask::delay(Duration::ms(500));
                         led_pwm.set_duty(max_duty);
                         CurrentTask::delay(Duration::ms(490));
+                    }
+                    LedState::FastSine => {
+                        led_pwm.enable();
+                        let val =
+                            max_duty - (max_duty as f32 * (count as f32 / 256.0 * PI).sin()) as u16;
+                        led_pwm.set_duty(val);
                     }
                 }
                 count += 5;

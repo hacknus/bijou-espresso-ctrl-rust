@@ -1,6 +1,7 @@
 // src/config.rs
 use crate::devices::w25q32::{
-    INTERFACE_DATA_ADDR, PID_1_DATA_ADDR, PID_2_DATA_ADDR, PID_BG_DATA_ADDR, PUMP_DATA_ADDR, W25Q32,
+    INTERFACE_DATA_ADDR, PID_1_DATA_ADDR, PID_2_DATA_ADDR, PID_BG_DATA_ADDR, PUMP_DATA_ADDR,
+    W25Q32,
 };
 use crate::usb::usb_println;
 use crate::utils::{Interface, PidData, PumpData};
@@ -11,7 +12,9 @@ use embedded_hal::{
     digital::v2::OutputPin,
 };
 
-// Configuration struct to store our settings
+// ── Stored structs ────────────────────────────────────────────────────────────
+// #[repr(C)] guarantees a stable field layout for raw flash storage.
+
 #[derive(Clone, Default)]
 pub struct Config {
     pub pump_data: PumpData,
@@ -21,7 +24,7 @@ pub struct Config {
     pub interface_temps: InterfaceConfigData,
 }
 
-// Only store the essential PID parameters
+#[repr(C)]
 #[derive(Clone, Default)]
 pub struct PidConfigData {
     pub kp: f32,
@@ -31,15 +34,19 @@ pub struct PidConfigData {
     pub max_val: f32,
     pub osr: u32,
     pub target: f32,
+    // size = 7 × 4 = 28 bytes; fits within BLOCK_SIZE (32 bytes)
 }
 
-// Only store temperature settings
+#[repr(C)]
 #[derive(Clone, Default)]
 pub struct InterfaceConfigData {
     pub coffee_temperature: f32,
     pub brew_head_temperature: f32,
     pub steam_temperature: f32,
+    // size = 3 × 4 = 12 bytes
 }
+
+// ── From conversions ──────────────────────────────────────────────────────────
 
 impl From<&PidData> for PidConfigData {
     fn from(pid: &PidData) -> Self {
@@ -65,6 +72,52 @@ impl From<&Interface> for InterfaceConfigData {
     }
 }
 
+// ── Flash block helpers ───────────────────────────────────────────────────────
+// Each config section occupies one 32-byte block.  The last 4 bytes hold a
+// simple additive checksum over the preceding struct bytes so we can detect
+// erased/corrupt flash without adding external crates.
+
+const BLOCK_SIZE: usize = 32;
+const CHECKSUM_OFFSET: usize = 28; // bytes [28..32] = u32 checksum
+
+fn compute_checksum(data: &[u8]) -> u32 {
+    data.iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
+}
+
+// ── Validation ────────────────────────────────────────────────────────────────
+
+fn is_valid_f32(v: f32, min: f32, max: f32) -> bool {
+    v.is_finite() && v >= min && v <= max
+}
+
+fn validate_pid_config(cfg: &PidConfigData) -> bool {
+    is_valid_f32(cfg.kp, 0.0, 10_000.0)
+        && is_valid_f32(cfg.ki, 0.0, 10_000.0)
+        && is_valid_f32(cfg.kd, 0.0, 10_000.0)
+        && cfg.window_size >= 10
+        && cfg.window_size <= 10_000
+        && is_valid_f32(cfg.max_val, 0.0, 1.5)
+        && cfg.osr >= 1
+        && cfg.osr <= 100
+        && is_valid_f32(cfg.target, 0.0, 160.0)
+}
+
+fn validate_pump_data(pump: &PumpData) -> bool {
+    is_valid_f32(pump.heat_up_power, 0.0, 100.0)
+        && is_valid_f32(pump.pre_infuse_power, 0.0, 100.0)
+        && is_valid_f32(pump.steam_power, 0.0, 100.0)
+        && is_valid_f32(pump.extract_power, 0.0, 100.0)
+        && is_valid_f32(pump.extraction_timeout, 100.0, 120_000.0)
+}
+
+fn validate_interface_config(cfg: &InterfaceConfigData) -> bool {
+    is_valid_f32(cfg.coffee_temperature, 0.0, 150.0)
+        && is_valid_f32(cfg.brew_head_temperature, 0.0, 150.0)
+        && is_valid_f32(cfg.steam_temperature, 0.0, 160.0)
+}
+
+// ── ConfigManager ─────────────────────────────────────────────────────────────
+
 pub struct ConfigManager<SPI, CS> {
     flash: W25Q32<SPI, CS>,
 }
@@ -77,126 +130,114 @@ where
     pub fn new(spi: SPI, cs: CS) -> Result<Self, E> {
         let mut flash = W25Q32::new(spi, cs);
         let id = flash.read_id()?;
-        usb_println(arrform!(164, "W25Q32 ID: {:02X} {:02X} {:02X}", id[0], id[1], id[2]).as_str());
+        usb_println(
+            arrform!(64, "W25Q32 ID: {:02X} {:02X} {:02X}", id[0], id[1], id[2]).as_str(),
+        );
         Ok(ConfigManager { flash })
     }
 
-    pub fn load_config(&mut self) -> Result<Config, E> {
-        let mut config = Config::default();
+    // ── Low-level block I/O ───────────────────────────────────────────────────
 
-        // Buffer for reading data
-        let mut buffer = [0u8; 256];
-
-        // Read PumpData
-        self.flash
-            .read_data(PUMP_DATA_ADDR, &mut buffer[0..mem::size_of::<PumpData>()])?;
-        if is_valid_f32_data(&buffer[0..mem::size_of::<PumpData>()]) {
-            unsafe {
-                config.pump_data = core::ptr::read(buffer.as_ptr() as *const PumpData);
-            }
-        }
-
-        // Read PID 1 data
-        self.flash.read_data(
-            PID_1_DATA_ADDR,
-            &mut buffer[0..mem::size_of::<PidConfigData>()],
-        )?;
-        if is_valid_f32_data(&buffer[0..mem::size_of::<PidConfigData>()]) {
-            unsafe {
-                config.pid_1_data = core::ptr::read(buffer.as_ptr() as *const PidConfigData);
-            }
-        }
-
-        // Read PID 2 data
-        self.flash.read_data(
-            PID_2_DATA_ADDR,
-            &mut buffer[0..mem::size_of::<PidConfigData>()],
-        )?;
-        if is_valid_f32_data(&buffer[0..mem::size_of::<PidConfigData>()]) {
-            unsafe {
-                config.pid_2_data = core::ptr::read(buffer.as_ptr() as *const PidConfigData);
-            }
-        }
-
-        // Read PID BG data
-        self.flash.read_data(
-            PID_BG_DATA_ADDR,
-            &mut buffer[0..mem::size_of::<PidConfigData>()],
-        )?;
-        if is_valid_f32_data(&buffer[0..mem::size_of::<PidConfigData>()]) {
-            unsafe {
-                config.pid_bg_data = core::ptr::read(buffer.as_ptr() as *const PidConfigData);
-            }
-        }
-
-        // Read Interface data
-        self.flash.read_data(
-            INTERFACE_DATA_ADDR,
-            &mut buffer[0..mem::size_of::<InterfaceConfigData>()],
-        )?;
-        if is_valid_f32_data(&buffer[0..mem::size_of::<InterfaceConfigData>()]) {
-            unsafe {
-                config.interface_temps =
-                    core::ptr::read(buffer.as_ptr() as *const InterfaceConfigData);
-            }
-        }
-
-        Ok(config)
+    /// Write `val` as a checked 32-byte block at `addr`.
+    /// The last 4 bytes of the block store the checksum.
+    fn write_block<T: Sized>(&mut self, addr: u32, val: &T) -> Result<(), E> {
+        let data = unsafe {
+            core::slice::from_raw_parts(val as *const T as *const u8, mem::size_of::<T>())
+        };
+        let mut block = [0u8; BLOCK_SIZE];
+        block[..data.len()].copy_from_slice(data);
+        let cs = compute_checksum(&block[..data.len()]);
+        block[CHECKSUM_OFFSET..CHECKSUM_OFFSET + 4].copy_from_slice(&cs.to_le_bytes());
+        self.flash.page_program(addr, &block)
     }
 
+    /// Read a 32-byte block from `addr`, verify checksum, validate ranges.
+    /// Returns `T::default()` on any failure so the firmware stays safe.
+    fn read_block<T: Sized + Default + Clone>(
+        &mut self,
+        addr: u32,
+        validate: fn(&T) -> bool,
+    ) -> Result<T, E> {
+        let mut block = [0u8; BLOCK_SIZE];
+        self.flash.read_data(addr, &mut block)?;
+
+        let data_len = mem::size_of::<T>();
+        let stored_cs =
+            u32::from_le_bytes([block[28], block[29], block[30], block[31]]);
+        let computed_cs = compute_checksum(&block[..data_len]);
+
+        if stored_cs != computed_cs {
+            usb_println("[CFG] checksum mismatch – using defaults");
+            return Ok(T::default());
+        }
+
+        // SAFETY: repr(C) guarantees layout.  read_unaligned handles the
+        // fact that `block` is u8-aligned, not necessarily T-aligned.
+        let val = unsafe { core::ptr::read_unaligned(block.as_ptr() as *const T) };
+
+        if !validate(&val) {
+            usb_println("[CFG] range check failed – using defaults");
+            return Ok(T::default());
+        }
+
+        Ok(val)
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    pub fn load_config(&mut self) -> Result<Config, E> {
+        Ok(Config {
+            pump_data: self.read_block::<PumpData>(PUMP_DATA_ADDR, validate_pump_data)?,
+            pid_1_data: self
+                .read_block::<PidConfigData>(PID_1_DATA_ADDR, validate_pid_config)?,
+            pid_2_data: self
+                .read_block::<PidConfigData>(PID_2_DATA_ADDR, validate_pid_config)?,
+            pid_bg_data: self
+                .read_block::<PidConfigData>(PID_BG_DATA_ADDR, validate_pid_config)?,
+            interface_temps: self
+                .read_block::<InterfaceConfigData>(INTERFACE_DATA_ADDR, validate_interface_config)?,
+        })
+    }
+
+    /// Erase sector 0 once, then write all five blocks.
+    /// This is the only function that touches the flash erase.
     pub fn save_config(&mut self, config: &Config) -> Result<(), E> {
-        // Erase the sectors before writing
+        // All five blocks live in sector 0 (addresses 0x000000–0x0004FF).
+        // One sector_erase clears all of them.
         self.flash.sector_erase(PUMP_DATA_ADDR)?;
 
-        // Write PumpData
-        let pump_data_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &config.pump_data as *const PumpData as *const u8,
-                mem::size_of::<PumpData>(),
-            )
-        };
-        self.flash.page_program(PUMP_DATA_ADDR, pump_data_bytes)?;
+        self.write_block(PUMP_DATA_ADDR, &config.pump_data)?;
+        self.write_block(PID_1_DATA_ADDR, &config.pid_1_data)?;
+        self.write_block(PID_2_DATA_ADDR, &config.pid_2_data)?;
+        self.write_block(PID_BG_DATA_ADDR, &config.pid_bg_data)?;
+        self.write_block(INTERFACE_DATA_ADDR, &config.interface_temps)?;
 
-        // Write PID 1 data
-        let pid_1_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &config.pid_1_data as *const PidConfigData as *const u8,
-                mem::size_of::<PidConfigData>(),
-            )
-        };
-        self.flash.page_program(PID_1_DATA_ADDR, pid_1_bytes)?;
-
-        // Write PID 2 data
-        let pid_2_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &config.pid_2_data as *const PidConfigData as *const u8,
-                mem::size_of::<PidConfigData>(),
-            )
-        };
-        self.flash.page_program(PID_2_DATA_ADDR, pid_2_bytes)?;
-
-        // Write PID BG data
-        let pid_bg_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &config.pid_bg_data as *const PidConfigData as *const u8,
-                mem::size_of::<PidConfigData>(),
-            )
-        };
-        self.flash.page_program(PID_BG_DATA_ADDR, pid_bg_bytes)?;
-
-        // Write Interface data
-        let interface_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &config.interface_temps as *const InterfaceConfigData as *const u8,
-                mem::size_of::<InterfaceConfigData>(),
-            )
-        };
-        self.flash
-            .page_program(INTERFACE_DATA_ADDR, interface_bytes)?;
-
-        usb_println("Configuration saved to flash");
+        usb_println("[CFG] all config saved");
         Ok(())
     }
+
+    /// Save all data in one erase cycle.  Used by `SaveAll` to avoid the
+    /// three-erase penalty of calling the individual `update_from_*` helpers.
+    pub fn save_all_data(
+        &mut self,
+        pid_1: &PidData,
+        pid_2: &PidData,
+        pid_bg: &PidData,
+        pump: &PumpData,
+        interface: &Interface,
+    ) -> Result<(), E> {
+        let config = Config {
+            pump_data: pump.clone(),
+            pid_1_data: PidConfigData::from(pid_1),
+            pid_2_data: PidConfigData::from(pid_2),
+            pid_bg_data: PidConfigData::from(pid_bg),
+            interface_temps: InterfaceConfigData::from(interface),
+        };
+        self.save_config(&config)
+    }
+
+    // ── Individual-section save/load helpers ──────────────────────────────────
+    // Each helper does load → mutate → save_config (one erase, preserves other sections).
 
     pub fn update_from_pid_data(
         &mut self,
@@ -230,32 +271,10 @@ where
         pid_bg: &mut PidData,
     ) -> Result<(), E> {
         let config = self.load_config()?;
-
-        pid_1.kp = config.pid_1_data.kp;
-        pid_1.ki = config.pid_1_data.ki;
-        pid_1.kd = config.pid_1_data.kd;
-        pid_1.window_size = config.pid_1_data.window_size;
-        pid_1.max_val = config.pid_1_data.max_val;
-        pid_1.osr = config.pid_1_data.osr;
-        pid_1.target = config.pid_1_data.target;
-
-        pid_2.kp = config.pid_2_data.kp;
-        pid_2.ki = config.pid_2_data.ki;
-        pid_2.kd = config.pid_2_data.kd;
-        pid_2.window_size = config.pid_2_data.window_size;
-        pid_2.max_val = config.pid_2_data.max_val;
-        pid_2.osr = config.pid_2_data.osr;
-        pid_2.target = config.pid_2_data.target;
-
-        pid_bg.kp = config.pid_bg_data.kp;
-        pid_bg.ki = config.pid_bg_data.ki;
-        pid_bg.kd = config.pid_bg_data.kd;
-        pid_bg.window_size = config.pid_bg_data.window_size;
-        pid_bg.max_val = config.pid_bg_data.max_val;
-        pid_bg.osr = config.pid_bg_data.osr;
-        pid_bg.target = config.pid_bg_data.target;
-
-        usb_println("Configuration loaded from flash");
+        apply_pid(&config.pid_1_data, pid_1);
+        apply_pid(&config.pid_2_data, pid_2);
+        apply_pid(&config.pid_bg_data, pid_bg);
+        usb_println("[CFG] PID config loaded");
         Ok(())
     }
 
@@ -274,19 +293,14 @@ where
     }
 }
 
-// Helper function to validate if the data contains valid f32 values
-// Simple check to make sure we're not reading uninitialized flash memory
-fn is_valid_f32_data(data: &[u8]) -> bool {
-    // Check if all bytes are 0xFF (erased flash)
-    if data.iter().all(|&b| b == 0xFF) {
-        return false;
-    }
+// ── Private helpers ───────────────────────────────────────────────────────────
 
-    // Check if data is all zeros
-    if data.iter().all(|&b| b == 0x00) {
-        return false;
-    }
-
-    // For more sophisticated validation, we could parse the f32 values and check ranges
-    true
+fn apply_pid(src: &PidConfigData, dst: &mut PidData) {
+    dst.kp = src.kp;
+    dst.ki = src.ki;
+    dst.kd = src.kd;
+    dst.window_size = src.window_size;
+    dst.max_val = src.max_val;
+    dst.osr = src.osr;
+    dst.target = src.target;
 }
