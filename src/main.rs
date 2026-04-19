@@ -1383,6 +1383,7 @@ fn main() -> ! {
             // Long-press threshold: 2 s at 100 ms tick period.
             const LONG_PRESS_TICKS: i32 = 20;
             let mut button_held_ticks: i32 = 0;
+            let mut long_press_armed = true;
             // True while the machine is in the steam world (SteamHeating / Ready+steam /
             // SteamReady / Steaming / extraction during steam heat-up).
             let mut steam_mode = false;
@@ -1492,13 +1493,19 @@ fn main() -> ! {
                     encoder_val = G_ENC_STATE.borrow(cs).get();
                 });
 
-                // Long-press detection: fires exactly once when threshold is reached.
+                // Long-press detection: emit a one-shot event, then require release to re-arm.
                 if interface.button {
                     button_held_ticks = (button_held_ticks + 1).min(LONG_PRESS_TICKS + 1);
                 } else {
                     button_held_ticks = 0;
+                    long_press_armed = true;
                 }
-                let long_press = button_held_ticks >= LONG_PRESS_TICKS;
+                let long_press = if long_press_armed && button_held_ticks >= LONG_PRESS_TICKS {
+                    long_press_armed = false;
+                    true
+                } else {
+                    false
+                };
 
                 match state.coffee_state {
                     CoffeeState::Idle => {
