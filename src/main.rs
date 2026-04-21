@@ -316,6 +316,7 @@ fn main() -> ! {
     let state = State::default();
     let state_container = Arc::new(Mutex::new(state).expect("Failed to create data guard mutex"));
     let state_container_main = state_container.clone();
+    let state_container_display = state_container.clone();
     let state_container_usb = state_container.clone();
     let state_container_pid = state_container;
 
@@ -1135,6 +1136,8 @@ fn main() -> ! {
             display.flush().unwrap();
             freertos_rust::CurrentTask::delay(Duration::ms(1000));
 
+            let mut state = State::default();
+
             loop {
                 if check_shutdown() {
                     break;
@@ -1146,6 +1149,11 @@ fn main() -> ! {
                 let mut t3 = None;
                 let mut t4 = None;
                 let mut t5 = None;
+
+                if let Ok(state_data) = state_container_display.lock(Duration::ms(5))
+                {
+                    state = state_data.clone();
+                }
 
                 if let Ok(temperature_data) = measured_data_container_display.lock(Duration::ms(5))
                 {
@@ -1792,7 +1800,7 @@ fn main() -> ! {
 
                         state.pump_state = PumpState::On(
                             (max_duty as f32
-                                * (pump.steam_power + 1.5)// 0.0 * (encoder_val as f32) / 5.0)
+                                * (pump.steam_power + 2.5)// 0.0 * (encoder_val as f32) / 5.0)
                                 / 100.0) as u16,
                         );
 
