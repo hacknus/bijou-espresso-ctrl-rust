@@ -1593,8 +1593,11 @@ fn main() -> ! {
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
-                        } else if steam_mode && state.heater_2_state == HeaterState::SteadyState {
-                            // Steam boiler caught up while we were in Ready → promote to SteamReady.
+                        } else if steam_mode
+                            && state.heater_1_state == HeaterState::SteadyState
+                            && state.heater_2_state == HeaterState::SteadyState
+                        {
+                            // Both boilers ready → promote to SteamReady.
                             state.coffee_state = CoffeeState::SteamReady;
                         } else if steam_mode
                             && (state.heater_1_state != HeaterState::SteadyState
@@ -1682,7 +1685,6 @@ fn main() -> ! {
                             // Route back into the appropriate world after shot.
                             if steam_mode {
                                 if state.heater_1_state == HeaterState::SteadyState
-                                    && state.heater_bg_state == HeaterState::SteadyState
                                     && state.heater_2_state == HeaterState::SteadyState
                                 {
                                     state.coffee_state = CoffeeState::SteamReady;
@@ -1736,10 +1738,9 @@ fn main() -> ! {
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
                         } else if state.heater_1_state == HeaterState::SteadyState
-                            && state.heater_bg_state == HeaterState::SteadyState
                             && state.heater_2_state == HeaterState::SteadyState
                         {
-                            // All boilers ready.
+                            // Both boilers ready.
                             state.coffee_state = CoffeeState::SteamReady;
                         } else if state.heater_1_state == HeaterState::SteadyState
                             && state.heater_bg_state == HeaterState::SteadyState
@@ -1766,11 +1767,11 @@ fn main() -> ! {
                         state.valve_2_state = ValveState::Closed;
 
                         if long_press {
-                            // Long press → back to coffee-only mode.
+                            // Long press → back to coffee-ready mode.
                             steam_mode = false;
                             pid_2_data.enable = false;
                             state.heater_2_state = HeaterState::Off;
-                            state.coffee_state = CoffeeState::CoffeeHeating;
+                            state.coffee_state = CoffeeState::Ready;
                         } else if encoder_val > 0 {
                             state.coffee_state = CoffeeState::Steaming;
                         } else if state.heater_1_state != HeaterState::SteadyState
@@ -1824,7 +1825,6 @@ fn main() -> ! {
                         if !interface.lever_switch {
                             if steam_mode {
                                 if state.heater_1_state == HeaterState::SteadyState
-                                    && state.heater_bg_state == HeaterState::SteadyState
                                     && state.heater_2_state == HeaterState::SteadyState
                                 {
                                     state.coffee_state = CoffeeState::SteamReady;
