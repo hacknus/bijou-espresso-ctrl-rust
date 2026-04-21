@@ -1780,6 +1780,19 @@ fn main() -> ! {
                             pid_2_data.enable = false;
                             state.heater_2_state = HeaterState::Off;
                             state.coffee_state = CoffeeState::Ready;
+                        } else if interface.lever_switch {
+                            if let Ok(mut pid_data_temp) =
+                                pid_1_data_container_main.lock(Duration::ms(5))
+                            {
+                                previous_kp = pid_data_temp.kp;
+                                previous_ki = pid_data_temp.ki;
+                                previous_kd = pid_data_temp.kd;
+                                previous_target = pid_data_temp.target;
+                                pid_data_temp.offset = 1.0;
+                                pid_data_temp.target += 2.0;
+                            }
+                            state.coffee_state = CoffeeState::PreInfuse;
+                            timer = 0;
                         } else if encoder_val > 0 {
                             state.coffee_state = CoffeeState::Steaming;
                         } else if state.heater_1_state != HeaterState::SteadyState
