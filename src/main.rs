@@ -1609,7 +1609,7 @@ fn main() -> ! {
                             state.coffee_state = CoffeeState::SteamReady;
                         } else if steam_mode
                             && (state.heater_1_state != HeaterState::SteadyState
-                                || state.heater_bg_state != HeaterState::SteadyState)
+                                || state.heater_2_state != HeaterState::SteadyState)
                         {
                             state.coffee_state = CoffeeState::SteamHeating;
                         } else if !steam_mode
@@ -1729,7 +1729,7 @@ fn main() -> ! {
                             pid_2_data.enable = false;
                             state.heater_2_state = HeaterState::Off;
                             state.coffee_state = CoffeeState::CoffeeHeating;
-                        } else if encoder_val > 0 {
+                        } else if encoder_val > 1 {
                             state.coffee_state = CoffeeState::Steaming;
                         } else if interface.lever_switch && !water_low {
                             // Allow extraction even while steam is still heating up.
@@ -1787,7 +1787,7 @@ fn main() -> ! {
                             }
                             state.coffee_state = CoffeeState::PreInfuse;
                             timer = 0;
-                        } else if encoder_val > 0 {
+                        } else if encoder_val > 1 {
                             state.coffee_state = CoffeeState::Steaming;
                         } else if state.heater_1_state != HeaterState::SteadyState
                             || state.heater_2_state != HeaterState::SteadyState
