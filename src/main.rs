@@ -1750,12 +1750,6 @@ fn main() -> ! {
                         {
                             // Both boilers ready.
                             state.coffee_state = CoffeeState::SteamReady;
-                        } else if state.heater_1_state == HeaterState::SteadyState
-                            && state.heater_bg_state == HeaterState::SteadyState
-                        {
-                            // Coffee ready; steam still coming up – go to Ready.
-                            // steam_mode stays true so Ready keeps pid_2 running.
-                            state.coffee_state = CoffeeState::Ready;
                         } else {
                             state.pump_state = PumpState::Off;
                         }
