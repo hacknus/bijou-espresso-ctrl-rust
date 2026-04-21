@@ -38,7 +38,9 @@ fn EXTI9_5() {
         } else if button_a.as_ref().unwrap().is_high() && button_b.as_ref().unwrap().is_high() {
             next -= ENCODER_STEP;
         }
-        G_ENC_STATE.borrow(cs).set(next.max(0));
+        G_ENC_STATE
+            .borrow(cs)
+            .set(if next < -2 { 0 } else { next });
         button_b.as_mut().unwrap().clear_interrupt_pending_bit();
     });
 }

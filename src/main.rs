@@ -1266,7 +1266,7 @@ fn main() -> ! {
                 });
 
                 Text::new(
-                    arrform!(128, "enc = {:}", pos).as_str(),
+                    arrform!(128, "e={:}, {:?}", pos, state.coffee_state).as_str(),
                     Point::new(0, 60),
                     MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
                 )
@@ -1494,7 +1494,7 @@ fn main() -> ! {
                 cortex_m::interrupt::free(|cs| {
                     encoder_val = G_ENC_STATE.borrow(cs).get();
                 });
-                if encoder_val < 0 {
+                if encoder_val < -2 {
                     encoder_val = 0;
                     cortex_m::interrupt::free(|cs| {
                         G_ENC_STATE.borrow(cs).set(0);
