@@ -134,7 +134,7 @@ fn main() -> ! {
     let water_low = false; // TODO: implement water_low pin
     let heater_1 = Channel1::new(gpioc.pc6);
     let heater_2 = Channel2::new(gpioc.pc7);
-    let heater_bg = Channel3::new(gpioa.pa2);
+    let heater_bg = Channel2::new(gpioa.pa1); // fix because pa2 is broken
 
     let lever = gpioe.pe7.into_floating_input();
     let bldc_v = Channel3::new(gpioc.pc8);
@@ -192,7 +192,7 @@ fn main() -> ! {
 
     // initialize heater bg pwm
     let mut heater_bg_pwm = dp.TIM5.pwm_hz(heater_bg, 3.Hz(), &clocks);
-    heater_bg_pwm.set_duty(Channel::C3, 0);
+    heater_bg_pwm.set_duty(Channel::C2, 0);
 
     // initialize usb
     let usb = USB {
@@ -686,8 +686,8 @@ fn main() -> ! {
                     heater_1_pwm.set_duty(0);
                     heater_2_pwm.disable();
                     heater_2_pwm.set_duty(0);
-                    heater_bg_pwm.disable(Channel::C3);
-                    heater_bg_pwm.set_duty(Channel::C3, 0);
+                    heater_bg_pwm.disable(Channel::C2);
+                    heater_bg_pwm.set_duty(Channel::C2, 0);
                     fault_2_led.off();
                     break;
                 }
@@ -1081,8 +1081,8 @@ fn main() -> ! {
                 match heater_bg_current_temperature {
                     None => {
                         // if we have no temperature, we need to turn off the heater
-                        heater_bg_pwm.disable(Channel::C3);
-                        heater_bg_pwm.set_duty(Channel::C3, 0);
+                        heater_bg_pwm.disable(Channel::C2);
+                        heater_bg_pwm.set_duty(Channel::C2, 0);
                     }
                     Some(t) => {
                         if mav_bg_counter > mav_update_interval {
@@ -1099,14 +1099,14 @@ fn main() -> ! {
                         };
                         let max_duty = heater_bg_pwm.get_max_duty();
                         if heater_bg_pid.enabled {
-                            heater_bg_pwm.enable(Channel::C3);
+                            heater_bg_pwm.enable(Channel::C2);
                             heater_bg_pwm.set_duty(
-                                Channel::C3,
+                                Channel::C2,
                                 (duty_cycle.clamp(0.0, 1.0) * (max_duty as f32)) as u16,
                             );
                         } else {
-                            heater_bg_pwm.disable(Channel::C3);
-                            heater_bg_pwm.set_duty(Channel::C3, 0);
+                            heater_bg_pwm.disable(Channel::C2);
+                            heater_bg_pwm.set_duty(Channel::C2, 0);
                         }
                     }
                 }
@@ -1150,8 +1150,7 @@ fn main() -> ! {
                 let mut t4 = None;
                 let mut t5 = None;
 
-                if let Ok(state_data) = state_container_display.lock(Duration::ms(5))
-                {
+                if let Ok(state_data) = state_container_display.lock(Duration::ms(5)) {
                     state = state_data.clone();
                 }
 

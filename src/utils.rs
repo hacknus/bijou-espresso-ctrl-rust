@@ -127,7 +127,7 @@ pub struct Interface {
 impl Default for Interface {
     fn default() -> Self {
         Interface {
-            coffee_temperature: 95.0,
+            coffee_temperature: 94.0,
             brew_head_temperature: 92.0,
             steam_temperature: 150.0,
             trigger_extraction: false,
