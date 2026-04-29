@@ -85,7 +85,7 @@ impl Default for PidData {
     }
 }
 #[allow(dead_code)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub enum CoffeeState {
     #[default]
     Idle,

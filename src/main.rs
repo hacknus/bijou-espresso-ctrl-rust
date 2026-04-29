@@ -44,8 +44,8 @@ use stm32f4xx_hal::{
 use tinybmp::Bmp;
 
 use crate::commands::{
-    extract_command, send_housekeeping, CmdContext, ConfigCommand, HeaterCommand, PumpCommand,
-    ValveCommand,
+    extract_command, send_housekeeping, BuzzerCommand, CmdContext, ConfigCommand, HeaterCommand,
+    PumpCommand, ValveCommand,
 };
 use crate::config::ConfigManager;
 use crate::devices::adc_sense::{read_current, read_pressure, ADC_MEMORY, G_XFR};
@@ -327,6 +327,7 @@ fn main() -> ! {
     let measured_data_container_pid_1 = measured_data_container.clone();
     let measured_data_container_pid_2 = measured_data_container.clone();
     let measured_data_container_pid_bg = measured_data_container.clone();
+    let measured_data_container_main = measured_data_container.clone();
     let measured_data_container_usb = measured_data_container;
 
     let mut pid_data_1 = PidData::default();
@@ -400,11 +401,52 @@ fn main() -> ! {
     let valve_command_queue_main = valve_command_queue.clone();
     let valve_command_queue_usb = valve_command_queue;
 
+    let buzzer_command_queue = Arc::new(Queue::new(10).unwrap());
+    let buzzer_command_queue_main = buzzer_command_queue.clone();
+    let buzzer_command_queue_task = buzzer_command_queue;
+
     delay.delay(1000.millis());
     usb_println("boot up ok");
     fault_1_led.on();
     fault_2_led.on();
     delay.delay(100.millis());
+
+    Task::new()
+        .name("BUZZER TASK")
+        .stack_size(512)
+        .priority(TaskPriority(1))
+        .start(move || {
+            const C4: u32 = 262;
+            const A4: u32 = 440;
+            const C5: u32 = 523;
+            const NOTE_MS: u32 = 120;
+            const GAP_MS: u32 = 50;
+
+            loop {
+                if check_shutdown() {
+                    buzz_pwm.disable(Channel::C4);
+                    break;
+                }
+
+                if let Ok(cmd) = buzzer_command_queue_task.receive(Duration::ms(50)) {
+                    let sequence: &[u32] = match cmd {
+                        BuzzerCommand::SteamMode => &[C4, A4],
+                        BuzzerCommand::CoffeeMode => &[A4, C4],
+                        BuzzerCommand::Ready => &[A4, A4],
+                        BuzzerCommand::Error => &[C4, C5, C5, C5],
+                    };
+
+                    for freq in sequence {
+                        buzz_pwm.set_period((*freq).Hz());
+                        buzz_pwm.enable(Channel::C4);
+                        CurrentTask::delay(Duration::ms(NOTE_MS));
+                        buzz_pwm.disable(Channel::C4);
+                        CurrentTask::delay(Duration::ms(GAP_MS));
+                    }
+                }
+            }
+        })
+        .unwrap();
 
     Task::new()
         .name("TEMPERATURE ADC TASK")
@@ -1385,11 +1427,12 @@ fn main() -> ! {
             let mut interface = Interface::default();
             let mut led_state;
             let mut state = State::default();
+            let mut measured_data = MeasuredData::default();
             let max_duty = bldc_pwm.get_max_duty();
             let mut timer = 0;
             let main_task_period: u32 = 100;
-            // Long-press threshold: 1.5 s at 100 ms tick period.
-            const LONG_PRESS_TICKS: i32 = 15;
+            // Long-press threshold: 0.5 s at 100 ms tick period.
+            const LONG_PRESS_TICKS: i32 = 5;
             let mut button_held_ticks: i32 = 0;
             let mut long_press_armed = true;
             // True while the machine is in the steam world (SteamHeating / Ready+steam /
@@ -1405,6 +1448,7 @@ fn main() -> ! {
             let mut previous_ki = pid_1_data.ki;
             let mut previous_kd = pid_1_data.kd;
             let mut previous_target = pid_1_data.target;
+            let mut error_active_prev = false;
 
             loop {
                 if check_shutdown() {
@@ -1430,6 +1474,11 @@ fn main() -> ! {
                 if let Ok(state_temp) = state_container_main.lock(Duration::ms(5)) {
                     state = state_temp.clone();
                 }
+                if let Ok(measured_data_temp) = measured_data_container_main.lock(Duration::ms(5)) {
+                    measured_data = measured_data_temp.clone();
+                }
+                let state_before = state.coffee_state;
+                let mut tone_sent_for_press = false;
 
                 if let Ok(cmd) = valve_command_queue_main.receive(Duration::ms(5)) {
                     match cmd {
@@ -1543,6 +1592,9 @@ fn main() -> ! {
                         if long_press && !water_low {
                             state.coffee_state = CoffeeState::SteamHeating;
                             state.heater_2_state = HeaterState::HeatUp;
+                            let _ = buzzer_command_queue_main
+                                .send(BuzzerCommand::SteamMode, Duration::ms(5));
+                            tone_sent_for_press = true;
                         } else if interface.lever_switch && !water_low {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
@@ -1578,11 +1630,17 @@ fn main() -> ! {
                                 pid_2_data.enable = false;
                                 state.heater_2_state = HeaterState::Off;
                                 state.coffee_state = CoffeeState::CoffeeHeating;
+                                let _ = buzzer_command_queue_main
+                                    .send(BuzzerCommand::CoffeeMode, Duration::ms(5));
+                                tone_sent_for_press = true;
                             } else if !water_low {
                                 // Long press in coffee mode → start steam heating.
                                 steam_mode = true;
                                 state.heater_2_state = HeaterState::HeatUp;
                                 state.coffee_state = CoffeeState::SteamHeating;
+                                let _ = buzzer_command_queue_main
+                                    .send(BuzzerCommand::SteamMode, Duration::ms(5));
+                                tone_sent_for_press = true;
                             }
                         } else if interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
@@ -1727,6 +1785,9 @@ fn main() -> ! {
                             pid_2_data.enable = false;
                             state.heater_2_state = HeaterState::Off;
                             state.coffee_state = CoffeeState::CoffeeHeating;
+                            let _ = buzzer_command_queue_main
+                                .send(BuzzerCommand::CoffeeMode, Duration::ms(5));
+                            tone_sent_for_press = true;
                         } else if encoder_val > 1 {
                             state.coffee_state = CoffeeState::Steaming;
                         } else if interface.lever_switch && !water_low {
@@ -1772,6 +1833,9 @@ fn main() -> ! {
                             pid_2_data.enable = false;
                             state.heater_2_state = HeaterState::Off;
                             state.coffee_state = CoffeeState::Ready;
+                            let _ = buzzer_command_queue_main
+                                .send(BuzzerCommand::CoffeeMode, Duration::ms(5));
+                            tone_sent_for_press = true;
                         } else if interface.lever_switch {
                             if let Ok(mut pid_data_temp) =
                                 pid_1_data_container_main.lock(Duration::ms(5))
@@ -1854,6 +1918,25 @@ fn main() -> ! {
                         }
                     }
                 }
+
+                if !tone_sent_for_press
+                    && state_before != state.coffee_state
+                    && (state.coffee_state == CoffeeState::Ready
+                        || state.coffee_state == CoffeeState::SteamReady)
+                {
+                    let _ = buzzer_command_queue_main.send(BuzzerCommand::Ready, Duration::ms(5));
+                }
+
+                let error_active =
+                    measured_data.t1.is_none()
+                        || measured_data.t2.is_none()
+                        || measured_data.t3.is_none()
+                        || measured_data.t4.is_none()
+                        || measured_data.t5.is_none();
+                if error_active && !error_active_prev {
+                    let _ = buzzer_command_queue_main.send(BuzzerCommand::Error, Duration::ms(5));
+                }
+                error_active_prev = error_active;
 
                 led_state = match state.coffee_state {
                     CoffeeState::Idle => LedState::Off,

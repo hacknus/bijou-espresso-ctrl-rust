@@ -53,6 +53,14 @@ pub enum ValveCommand {
     Valve2(Option<bool>),
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum BuzzerCommand {
+    SteamMode,
+    CoffeeMode,
+    Ready,
+    Error,
+}
+
 // ── Command context ───────────────────────────────────────────────────────────
 
 pub struct CmdContext {
