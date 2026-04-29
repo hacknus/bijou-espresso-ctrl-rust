@@ -413,7 +413,7 @@ fn main() -> ! {
 
     Task::new()
         .name("BUZZER TASK")
-        .stack_size(512)
+        .stack_size(1024)
         .priority(TaskPriority(1))
         .start(move || {
             const C4: u32 = 262;
@@ -1416,7 +1416,7 @@ fn main() -> ! {
 
     Task::new()
         .name("MAIN TASK")
-        .stack_size(512)
+        .stack_size(1024)
         .priority(TaskPriority(2))
         .start(move || {
             let mut pid_1_data = PidData::default();
