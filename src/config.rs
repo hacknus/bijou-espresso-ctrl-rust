@@ -113,7 +113,7 @@ fn validate_pump_data(pump: &PumpData) -> bool {
 fn validate_interface_config(cfg: &InterfaceConfigData) -> bool {
     is_valid_f32(cfg.coffee_temperature, 0.0, 150.0)
         && is_valid_f32(cfg.brew_head_temperature, 0.0, 150.0)
-        && is_valid_f32(cfg.steam_temperature, 0.0, 160.0)
+        && is_valid_f32(cfg.steam_temperature, 0.0, 165.0)
 }
 
 // ── ConfigManager ─────────────────────────────────────────────────────────────

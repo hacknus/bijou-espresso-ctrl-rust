@@ -129,7 +129,7 @@ impl Default for Interface {
         Interface {
             coffee_temperature: 94.0,
             brew_head_temperature: 92.0,
-            steam_temperature: 150.0,
+            steam_temperature: 165.0,
             trigger_extraction: false,
             lever_switch: false,
             button: false,

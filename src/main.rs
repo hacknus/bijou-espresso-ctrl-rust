@@ -1805,7 +1805,7 @@ fn main() -> ! {
 
                         state.pump_state = PumpState::On(
                             (max_duty as f32
-                                * (pump.steam_power + 2.5)// 0.0 * (encoder_val as f32) / 5.0)
+                                * (pump.steam_power + 3.5)// 0.0 * (encoder_val as f32) / 5.0)
                                 / 100.0) as u16,
                         );
 
