@@ -110,8 +110,7 @@ fn main() -> ! {
     let mut fault_1_led = LED::new(gpioe.pe13.into_push_pull_output());
     let mut fault_2_led = LED::new(gpioe.pe14.into_push_pull_output());
 
-    // TODO check if TIM4 actually works, before it was TIM5
-    let mut tick_timer = dp.TIM4.counter_ms(&clocks);
+    let mut tick_timer = dp.TIM5.counter_ms(&clocks);
     tick_timer.start(60000.millis()).unwrap(); // set the timeout to 31 days
 
     stat_led.on();
@@ -134,7 +133,7 @@ fn main() -> ! {
     let water_low = false; // TODO: implement water_low pin
     let heater_1 = Channel1::new(gpioc.pc6);
     let heater_2 = Channel2::new(gpioc.pc7);
-    let heater_bg = Channel2::new(gpioa.pa1); // fix because pa2 is broken
+    let heater_bg = Channel4::new(gpiod.pd15); // fix because pa2 is broken
 
     let lever = gpioe.pe7.into_floating_input();
     let bldc_v = Channel3::new(gpioc.pc8);
@@ -191,8 +190,8 @@ fn main() -> ! {
     heater_2_pwm.set_duty(0);
 
     // initialize heater bg pwm
-    let mut heater_bg_pwm = dp.TIM5.pwm_hz(heater_bg, 3.Hz(), &clocks);
-    heater_bg_pwm.set_duty(Channel::C2, 0);
+    let mut heater_bg_pwm = dp.TIM4.pwm_hz(heater_bg, 3.Hz(), &clocks);
+    heater_bg_pwm.set_duty(Channel::C4, 0);
 
     // initialize usb
     let usb = USB {
@@ -686,8 +685,8 @@ fn main() -> ! {
                     heater_1_pwm.set_duty(0);
                     heater_2_pwm.disable();
                     heater_2_pwm.set_duty(0);
-                    heater_bg_pwm.disable(Channel::C2);
-                    heater_bg_pwm.set_duty(Channel::C2, 0);
+                    heater_bg_pwm.disable(Channel::C4);
+                    heater_bg_pwm.set_duty(Channel::C4, 0);
                     fault_2_led.off();
                     break;
                 }
@@ -1081,8 +1080,8 @@ fn main() -> ! {
                 match heater_bg_current_temperature {
                     None => {
                         // if we have no temperature, we need to turn off the heater
-                        heater_bg_pwm.disable(Channel::C2);
-                        heater_bg_pwm.set_duty(Channel::C2, 0);
+                        heater_bg_pwm.disable(Channel::C4);
+                        heater_bg_pwm.set_duty(Channel::C4, 0);
                     }
                     Some(t) => {
                         if mav_bg_counter > mav_update_interval {
@@ -1099,14 +1098,14 @@ fn main() -> ! {
                         };
                         let max_duty = heater_bg_pwm.get_max_duty();
                         if heater_bg_pid.enabled {
-                            heater_bg_pwm.enable(Channel::C2);
+                            heater_bg_pwm.enable(Channel::C4);
                             heater_bg_pwm.set_duty(
-                                Channel::C2,
+                                Channel::C4,
                                 (duty_cycle.clamp(0.0, 1.0) * (max_duty as f32)) as u16,
                             );
                         } else {
-                            heater_bg_pwm.disable(Channel::C2);
-                            heater_bg_pwm.set_duty(Channel::C2, 0);
+                            heater_bg_pwm.disable(Channel::C4);
+                            heater_bg_pwm.set_duty(Channel::C4, 0);
                         }
                     }
                 }
